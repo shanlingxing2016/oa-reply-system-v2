@@ -605,7 +605,10 @@ async function uploadFile(n, input) {
   try {
     var resp = await api('POST', '/api/cases/'+CASE_ID+'/documents?doc_type='+docType, fd);
     if (resp.ok) {
-      var data = await resp.json();
+      var respText = await resp.text();
+      if (!respText) { uz.style.opacity = '1'; alert('上传失败: 服务器处理超时（文件可能过大），请重试或换小文件'); return; }
+      var data;
+      try { data = JSON.parse(respText); } catch(je) { uz.style.opacity = '1'; alert('上传失败: 服务器异常，请重试'); return; }
       uz.classList.add('uploaded');
       document.getElementById('file'+n+'name').textContent = '✓ ' + f.name;
       document.getElementById('file'+n+'hint').textContent = data.message || '';
@@ -1105,6 +1108,9 @@ async function aiAnalyze() {
     renderCompTable();
     renderComp2Table();
     renderEffectTable();
+    // 获取案件信息（用于回退 agent_notes）
+    var caseResp = await api('GET', '/api/cases/'+CASE_ID);
+    var caseData = caseResp.ok ? await caseResp.json() : {};
     // 更新技术问题区域（AI 分析结果优先）
     if (data.result && data.result.tech_problem) {
       document.getElementById('techProblemArea').value = data.result.tech_problem;
