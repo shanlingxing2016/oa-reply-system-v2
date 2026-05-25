@@ -1,7 +1,8 @@
 import uvicorn
-from fastapi import FastAPI
+import traceback
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
 import os
@@ -24,6 +25,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="审查意见答复系统", version="1.0", lifespan=lifespan)
+
+# 全局异常处理：确保任何未捕获异常都返回 JSON 而非空响应
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"服务器内部错误: {str(exc)}"},
+    )
 
 # 注册路由
 app.include_router(auth.router)
