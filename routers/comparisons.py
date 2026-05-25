@@ -5,6 +5,7 @@ from typing import Optional, List
 from database import get_db
 from models import Case, Comparison, Document
 from services.ai_service import AIService
+from services.pdf_parser import PDFParser
 from config import DEEPSEEK_API_KEY
 
 router = APIRouter(prefix="/api/cases/{case_id}/comparisons", tags=["comparisons"])
@@ -144,11 +145,22 @@ async def ai_analyze(case_id: int, db: Session = Depends(get_db)):
     if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY == "":
         raise HTTPException(status_code=400, detail="未配置 DeepSeek API Key")
 
-    # 获取所有文档文本
+    # 获取所有文档文本（未解析的按需解析）
     docs = db.query(Document).filter(Document.case_id == case_id).all()
+    pdf_parser = PDFParser()
     doc_texts = {}
     for d in docs:
-        doc_texts[d.doc_type] = d.extracted_text or ""
+        text = d.extracted_text or ""
+        if not text and d.stored_path:
+            try:
+                result = pdf_parser.parse(d.stored_path)
+                text = result.get("full_text", "")
+                if text:
+                    d.extracted_text = text
+                    db.commit()
+            except Exception:
+                pass
+        doc_texts[d.doc_type] = text
 
     patent_text = doc_texts.get("patent", "")
     d1_text = doc_texts.get("d1", "")
@@ -314,11 +326,21 @@ async def ai_analyze_table2(case_id: int, db: Session = Depends(get_db)):
     if not diff_features:
         raise HTTPException(status_code=400, detail="没有区别技术特征可以分析，请先填写表一")
 
-    # 获取 D2 文本（及 D3 等）
+    # 获取 D2 文本（及 D3 等），未解析的按需解析
     docs = db.query(Document).filter(Document.case_id == case_id).all()
     doc_texts = {}
     for d in docs:
-        doc_texts[d.doc_type] = d.extracted_text or ""
+        text = d.extracted_text or ""
+        if not text and d.stored_path:
+            try:
+                result = pdf_parser.parse(d.stored_path)
+                text = result.get("full_text", "")
+                if text:
+                    d.extracted_text = text
+                    db.commit()
+            except Exception:
+                pass
+        doc_texts[d.doc_type] = text
 
     d2_text = doc_texts.get("d2", "")
     patent_text = doc_texts.get("patent", "")
@@ -438,11 +460,21 @@ async def ai_analyze_effects(case_id: int, db: Session = Depends(get_db)):
     if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY == "":
         raise HTTPException(status_code=400, detail="未配置 DeepSeek API Key")
 
-    # 获取本申请和对比文件文本
+    # 获取本申请和对比文件文本，未解析的按需解析
     docs = db.query(Document).filter(Document.case_id == case_id).all()
     doc_texts = {}
     for d in docs:
-        doc_texts[d.doc_type] = d.extracted_text or ""
+        text = d.extracted_text or ""
+        if not text and d.stored_path:
+            try:
+                result = pdf_parser.parse(d.stored_path)
+                text = result.get("full_text", "")
+                if text:
+                    d.extracted_text = text
+                    db.commit()
+            except Exception:
+                pass
+        doc_texts[d.doc_type] = text
 
     patent_text = doc_texts.get("patent", "")
     d1_text = doc_texts.get("d1", "")
