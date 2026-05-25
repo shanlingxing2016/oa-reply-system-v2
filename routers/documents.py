@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
 from pathlib import Path
 import shutil
@@ -93,7 +93,6 @@ def upload_document(
     case_id: int,
     doc_type: str = Query(..., description="oa/patent/d1/d2"),
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
 ):
     if doc_type not in ALLOWED_TYPES:
@@ -139,18 +138,49 @@ def upload_document(
     db.commit()
     db.refresh(doc)
 
-    # 后台解析（避免大文件解析超时/崩溃阻塞上传）
-    if background_tasks:
-        background_tasks.add_task(_parse_in_background, doc.id, str(stored_path), doc_type, case_id)
+    # 仅对小文件做快速同步解析（<2MB）；大文件在 AI 分析时按需解析，避免 OCR 崩溃
+    extracted = False
+    auto_filled = {}
+    try:
+        if len(content) < 2 * 1024 * 1024:
+            result = pdf_parser.parse(str(stored_path))
+            text = result.get("full_text", "")
+            if text:
+                doc.extracted_text = text
+                db.commit()
+                extracted = True
+                if doc_type in ("oa", "patent"):
+                    meta = _extract_case_meta(text)
+                    if meta:
+                        c = db.query(Case).filter(Case.id == case_id).first()
+                        if c:
+                            is_placeholder = (not c.case_number) or c.case_number.startswith("待识别-")
+                            changed = False
+                            if meta.get("case_number") and is_placeholder:
+                                c.case_number = meta["case_number"]
+                                auto_filled["case_number"] = meta["case_number"]
+                                changed = True
+                            if meta.get("case_name") and (not c.case_name or c.case_name.strip() == ""):
+                                c.case_name = meta["case_name"]
+                                auto_filled["case_name"] = meta["case_name"]
+                                changed = True
+                            if changed:
+                                from datetime import datetime
+                                c.updated_at = datetime.now()
+                                db.commit()
+    except Exception:
+        pass
+
+    msg = "上传成功" + ("，已自动解析" if extracted else "（大文件将于AI分析时解析）")
 
     return {
         "id": doc.id,
         "doc_type": doc.doc_type,
         "original_filename": doc.original_filename,
-        "extracted_text": "",
-        "extracted_text_length": 0,
-        "message": "上传成功，正在后台解析...",
-        "auto_filled": {},
+        "extracted_text": doc.extracted_text or "",
+        "extracted_text_length": len(doc.extracted_text) if doc.extracted_text else 0,
+        "message": msg,
+        "auto_filled": auto_filled,
     }
 
 
