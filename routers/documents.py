@@ -1,0 +1,170 @@
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from sqlalchemy.orm import Session
+from pathlib import Path
+import shutil
+import uuid
+import re
+from database import get_db
+from models import Case, Document, Comparison
+from services.pdf_parser import PDFParser
+from config import UPLOAD_DIR, MAX_FILE_SIZE
+
+router = APIRouter(prefix="/api", tags=["documents"])
+
+pdf_parser = PDFParser()
+
+ALLOWED_TYPES = {"oa": "审查意见通知书", "patent": "申请文件", "d1": "对比文件D1", "d2": "对比文件2", "d3": "对比文件3", "d4": "对比文件4", "d5": "对比文件5", "template": "参考意见陈述书"}
+
+
+def _extract_case_meta(text: str) -> dict:
+    """从文本中提取申请号和发明名称"""
+    result = {}
+    # 申请号：多种格式
+    patterns_num = [
+        r'申请号[：:\s]*([0-9]{13}[A-Z]?)',           # 标准13位
+        r'申请号[：:\s]*([0-9A-Z\-\.]{10,20})',       # 通用格式
+        r'Application No\.?\s*[：:\s]*([0-9A-Z\-\.]{10,20})',
+    ]
+    for p in patterns_num:
+        m = re.search(p, text[:3000])
+        if m:
+            result['case_number'] = m.group(1).strip()
+            break
+
+    # 发明名称
+    patterns_name = [
+        r'发明名称[：:\s]*[\n]?\s*(.{5,80})',
+        r'名\s*称[：:\s]*[\n]?\s*(.{5,80})',
+        r'Title[：:\s]*[\n]?\s*(.{5,80})',
+    ]
+    for p in patterns_name:
+        m = re.search(p, text[:3000])
+        if m:
+            name = m.group(1).strip()
+            # 去掉换行及多余空格
+            name = re.sub(r'\s+', ' ', name).strip()
+            # 截取到明显结束符
+            name = re.split(r'[（(申请人发明人\n]', name)[0].strip()
+            if 4 < len(name) < 100:
+                result['case_name'] = name
+                break
+    return result
+
+
+@router.post("/cases/{case_id}/documents")
+def upload_document(
+    case_id: int,
+    doc_type: str = Query(..., description="oa/patent/d1/d2"),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    if doc_type not in ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail=f"doc_type 须为: {', '.join(ALLOWED_TYPES.keys())}")
+
+    case = db.query(Case).filter(Case.id == case_id).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="案件不存在")
+
+    # 检查是否已存在同类型文档，存在则覆盖
+    existing = db.query(Document).filter(Document.case_id == case_id, Document.doc_type == doc_type).first()
+
+    # 保存文件
+    suffix = Path(file.filename).suffix if file.filename else ".pdf"
+    stored_name = f"{case_id}_{doc_type}_{uuid.uuid4().hex[:8]}{suffix}"
+    stored_path = UPLOAD_DIR / stored_name
+
+    content = file.file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="文件过大（最大50MB）")
+
+    with open(stored_path, "wb") as f:
+        f.write(content)
+
+    if existing:
+        # 覆盖旧文件
+        old_path = Path(existing.stored_path) if existing.stored_path else None
+        if old_path and old_path.exists():
+            old_path.unlink()
+        existing.original_filename = file.filename
+        existing.stored_path = str(stored_path)
+        existing.extracted_text = None
+        doc = existing
+    else:
+        doc = Document(
+            case_id=case_id,
+            doc_type=doc_type,
+            original_filename=file.filename,
+            stored_path=str(stored_path),
+        )
+        db.add(doc)
+
+    db.commit()
+    db.refresh(doc)
+
+    # 自动解析
+    extracted = False
+    try:
+        result = pdf_parser.parse(str(stored_path))
+        doc.extracted_text = result.get("full_text", "")
+        db.commit()
+        extracted = bool(doc.extracted_text)
+    except Exception as e:
+        # 解析失败不阻断上传
+        pass
+
+    # 从 OA 或申请文件中自动提取申请号、发明名称，回填案件
+    auto_filled = {}
+    if extracted and doc.extracted_text and doc_type in ("oa", "patent"):
+        meta = _extract_case_meta(doc.extracted_text)
+        if meta:
+            c = db.query(Case).filter(Case.id == case_id).first()
+            if c:
+                # 申请号：如果当前是占位符（以"待识别-"开头）或为空，则覆盖
+                is_placeholder = (not c.case_number) or c.case_number.startswith("待识别-")
+                if meta.get("case_number") and is_placeholder:
+                    c.case_number = meta["case_number"]
+                    auto_filled["case_number"] = meta["case_number"]
+                if meta.get("case_name") and (not c.case_name or c.case_name.strip() == ""):
+                    c.case_name = meta["case_name"]
+                    auto_filled["case_name"] = meta["case_name"]
+                if auto_filled:
+                    from datetime import datetime
+                    c.updated_at = datetime.now()
+                    db.commit()
+
+    return {
+        "id": doc.id,
+        "doc_type": doc.doc_type,
+        "original_filename": doc.original_filename,
+        "extracted_text": doc.extracted_text or "",
+        "extracted_text_length": len(doc.extracted_text) if doc.extracted_text else 0,
+        "message": "上传成功" + ("，已自动解析" if doc.extracted_text else ""),
+        "auto_filled": auto_filled,
+    }
+
+
+@router.get("/documents/{doc_id}")
+def get_document(doc_id: int, db: Session = Depends(get_db)):
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return {
+        "id": doc.id,
+        "doc_type": doc.doc_type,
+        "original_filename": doc.original_filename,
+        "extracted_text": doc.extracted_text,
+    }
+
+
+@router.delete("/documents/{doc_id}")
+def delete_document(doc_id: int, db: Session = Depends(get_db)):
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    if doc.stored_path:
+        p = Path(doc.stored_path)
+        if p.exists():
+            p.unlink()
+    db.delete(doc)
+    db.commit()
+    return {"message": "已删除"}
