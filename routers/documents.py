@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from pathlib import Path
 import shutil
 import uuid
 import re
+import traceback
 from database import get_db
 from models import Case, Document, Comparison
 from services.pdf_parser import PDFParser
@@ -12,6 +13,42 @@ from config import UPLOAD_DIR, MAX_FILE_SIZE
 router = APIRouter(prefix="/api", tags=["documents"])
 
 pdf_parser = PDFParser()
+
+
+def _parse_in_background(doc_id: int, stored_path: str, doc_type: str, case_id: int):
+    """后台解析文档并更新数据库"""
+    from database import SessionLocal
+    db_bg = SessionLocal()
+    try:
+        result = pdf_parser.parse(stored_path)
+        text = result.get("full_text", "")
+        if text:
+            doc_bg = db_bg.query(Document).filter(Document.id == doc_id).first()
+            if doc_bg:
+                doc_bg.extracted_text = text
+                db_bg.commit()
+                # 自动提取申请号/发明名称
+                if doc_type in ("oa", "patent"):
+                    meta = _extract_case_meta(text)
+                    if meta:
+                        case_bg = db_bg.query(Case).filter(Case.id == case_id).first()
+                        if case_bg:
+                            is_placeholder = (not case_bg.case_number) or case_bg.case_number.startswith("待识别-")
+                            changed = False
+                            if meta.get("case_number") and is_placeholder:
+                                case_bg.case_number = meta["case_number"]
+                                changed = True
+                            if meta.get("case_name") and (not case_bg.case_name or case_bg.case_name.strip() == ""):
+                                case_bg.case_name = meta["case_name"]
+                                changed = True
+                            if changed:
+                                from datetime import datetime
+                                case_bg.updated_at = datetime.now()
+                                db_bg.commit()
+    except Exception:
+        traceback.print_exc()
+    finally:
+        db_bg.close()
 
 ALLOWED_TYPES = {"oa": "审查意见通知书", "patent": "申请文件", "d1": "对比文件D1", "d2": "对比文件2", "d3": "对比文件3", "d4": "对比文件4", "d5": "对比文件5", "template": "参考意见陈述书"}
 
@@ -56,6 +93,7 @@ def upload_document(
     case_id: int,
     doc_type: str = Query(..., description="oa/patent/d1/d2"),
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
 ):
     if doc_type not in ALLOWED_TYPES:
@@ -101,45 +139,18 @@ def upload_document(
     db.commit()
     db.refresh(doc)
 
-    # 自动解析
-    extracted = False
-    try:
-        result = pdf_parser.parse(str(stored_path))
-        doc.extracted_text = result.get("full_text", "")
-        db.commit()
-        extracted = bool(doc.extracted_text)
-    except Exception as e:
-        # 解析失败不阻断上传
-        pass
-
-    # 从 OA 或申请文件中自动提取申请号、发明名称，回填案件
-    auto_filled = {}
-    if extracted and doc.extracted_text and doc_type in ("oa", "patent"):
-        meta = _extract_case_meta(doc.extracted_text)
-        if meta:
-            c = db.query(Case).filter(Case.id == case_id).first()
-            if c:
-                # 申请号：如果当前是占位符（以"待识别-"开头）或为空，则覆盖
-                is_placeholder = (not c.case_number) or c.case_number.startswith("待识别-")
-                if meta.get("case_number") and is_placeholder:
-                    c.case_number = meta["case_number"]
-                    auto_filled["case_number"] = meta["case_number"]
-                if meta.get("case_name") and (not c.case_name or c.case_name.strip() == ""):
-                    c.case_name = meta["case_name"]
-                    auto_filled["case_name"] = meta["case_name"]
-                if auto_filled:
-                    from datetime import datetime
-                    c.updated_at = datetime.now()
-                    db.commit()
+    # 后台解析（避免大文件解析超时/崩溃阻塞上传）
+    if background_tasks:
+        background_tasks.add_task(_parse_in_background, doc.id, str(stored_path), doc_type, case_id)
 
     return {
         "id": doc.id,
         "doc_type": doc.doc_type,
         "original_filename": doc.original_filename,
-        "extracted_text": doc.extracted_text or "",
-        "extracted_text_length": len(doc.extracted_text) if doc.extracted_text else 0,
-        "message": "上传成功" + ("，已自动解析" if doc.extracted_text else ""),
-        "auto_filled": auto_filled,
+        "extracted_text": "",
+        "extracted_text_length": 0,
+        "message": "上传成功，正在后台解析...",
+        "auto_filled": {},
     }
 
 
