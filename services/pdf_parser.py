@@ -21,18 +21,31 @@ class PDFParser:
             raise ValueError(f"不支持的文件格式: {ext}")
 
     def parse_pdf(self, file_path: str) -> Dict:
-        from pypdf import PdfReader
-
-        reader = PdfReader(file_path)
+        # 策略：PyMuPDF（最强文本提取 + 表格）→ pypdf → 图片OCR
         pages = []
+        full_text = ""
+
+        # 第一优先：PyMuPDF 提取（含表格结构，极低内存）
+        fitz_text = self._fitz_extract_text(file_path)
+        if fitz_text.strip():
+            full_text = fitz_text.strip()
+            # 按页拆分
+            for i, block in enumerate(full_text.split("\f")):
+                if block.strip():
+                    pages.append({"page": i + 1, "content": block.strip()})
+            total_pages = len(pages) or 1
+            return {"total_pages": total_pages, "full_text": full_text, "pages": pages}
+
+        # 第二优先：pypdf 文本提取
+        from pypdf import PdfReader
+        reader = PdfReader(file_path)
         for i, page in enumerate(reader.pages):
             text = (page.extract_text() or "").strip()
             if text:
                 pages.append({"page": i + 1, "content": text})
+        full_text = "\n\n".join(p["content"] for p in pages) if pages else ""
 
-        full_text = "\n\n".join(p["content"] for p in pages)
-
-        # 如果 pypdf 提取不到文字，尝试 OCR（返回原始文本即可，不做页级拆分）
+        # 第三：图片 OCR（扫描件专用，内存重）
         if not full_text.strip():
             full_text = self._ocr_pdf(file_path)
             pages = [{"page": 1, "content": full_text.strip()}] if full_text.strip() else []
@@ -41,6 +54,27 @@ class PDFParser:
             total_pages = len(reader.pages)
 
         return {"total_pages": total_pages, "full_text": full_text.strip(), "pages": pages}
+
+    def _fitz_extract_text(self, pdf_path: str) -> str:
+        """用 PyMuPDF 提取 PDF 文本（含表格结构），极低内存"""
+        try:
+            import fitz
+            doc = fitz.open(pdf_path)
+            try:
+                MAX_PAGES = 50
+                parts = []
+                for i, page in enumerate(doc):
+                    if i >= MAX_PAGES:
+                        break
+                    # get_text("text") 保留基本结构，比 pypdf 强很多
+                    text = page.get_text("text")
+                    if text.strip():
+                        parts.append(text.strip())
+                return "\f".join(parts)  # \f = 换页符，方便后续按页拆分
+            finally:
+                doc.close()
+        except Exception:
+            return ""
 
     def _extract_images_from_pdf(self, pdf_path: str) -> list:
         """从 PDF 提取每页为 Pillow Image，不依赖 poppler"""
