@@ -437,6 +437,22 @@ async def ai_analyze_table2(case_id: int, db: Session = Depends(get_db)):
 
         db.commit()
 
+        # 【兜底清理】删除所有 diff_no 不在原始特征列表中的表二行
+        # 防止 AI 返回多余特征导致表二行数膨胀
+        valid_nos = set(feat["diff_no"] for feat in diff_features if feat.get("diff_no"))
+        all_t2 = (
+            db.query(Comparison)
+            .filter(Comparison.case_id == case_id, Comparison.table_type == "table2")
+            .all()
+        )
+        cleaned = 0
+        for r in all_t2:
+            if r.diff_no and r.diff_no not in valid_nos:
+                db.delete(r)
+                cleaned += 1
+        if cleaned > 0:
+            db.commit()
+
         # 返回更新后的表二数据
         updated_rows = (
             db.query(Comparison)
