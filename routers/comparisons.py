@@ -156,9 +156,14 @@ async def ai_analyze(case_id: int, db: Session = Depends(get_db)):
             try:
                 result = pdf_parser.parse(d.stored_path)
                 text = result.get("full_text", "")
-                if text:
+                # 排除 OCR 错误字符串（如 "[OCR解析异常: ...]"）
+                if text and not text.startswith("[OCR") and not text.startswith("[API"):
                     d.extracted_text = text
                     db.commit()
+                elif text:
+                    # OCR 出了错但返回了错误描述
+                    parse_errors[d.doc_type] = f"{d.original_filename}{text}"
+                    text = ""  # 不把错误信息当作文本传给AI
                 else:
                     parse_errors[d.doc_type] = f"{d.original_filename} 解析结果为空"
             except Exception as e:
