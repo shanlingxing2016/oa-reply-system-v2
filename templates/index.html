@@ -31,6 +31,7 @@
     <div class="header-logo">⚖ 审查意见答复系统</div>
     <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
       <button class="btn btn-sm" onclick="showNewCaseDialog()">+ 新建案件</button>
+      <button class="btn btn-sm" onclick="clearDatabase()" style="color:#d9534f;border-color:#d9534f">清空库</button>
       <button class="btn btn-sm" onclick="doLogout()" style="color:#a32d2d">退出</button>
     </div>
   </div>
@@ -461,6 +462,15 @@ function showNewCaseDialog() {
   document.getElementById('newCaseId').value = '';
   document.getElementById('newCaseName').value = '';
   document.getElementById('newCaseId').focus();
+}
+
+async function clearDatabase() {
+  if (!confirm('⚠️ 确定要清空所有数据吗？此操作不可恢复！')) return;
+  var resp = await authApi('POST', '/api/admin/reset');
+  if (!resp.ok) { alert('清库失败: ' + (await resp.json()).detail); return; }
+  var data = await resp.json();
+  alert('已清空: ' + data.deleted.cases + ' 个案件, ' + data.deleted.documents + ' 个文档, ' + data.deleted.comparisons + ' 个比对, ' + data.deleted.generated_docs + ' 个生成文档');
+  loadCaseList();
 }
 
 async function createNewCase() {
