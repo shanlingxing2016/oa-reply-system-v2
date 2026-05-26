@@ -7,6 +7,7 @@ import re
 from database import get_db
 from models import Case, Document, GeneratedDocument, Comparison
 from services.ai_service import AIService
+from services.pdf_parser import PDFParser
 from config import DEEPSEEK_API_KEY
 
 router = APIRouter(prefix="/api/cases/{case_id}", tags=["analysis"])
@@ -322,7 +323,20 @@ async def analyze_oa(case_id: int, body: AnalyzeRequest, db: Session = Depends(g
             .filter(Document.case_id == case_id, Document.doc_type == "oa")
             .first()
         )
-    if not oa_doc or not oa_doc.extracted_text:
+    if not oa_doc:
+        raise HTTPException(status_code=400, detail="未找到 OA 通知书，请先上传")
+    # 按需解析：大文件上传时跳过了解析，在此处补解析
+    if not oa_doc.extracted_text and oa_doc.stored_path:
+        try:
+            pdf_parser = PDFParser()
+            result = pdf_parser.parse(oa_doc.stored_path)
+            text = result.get("full_text", "")
+            if text:
+                oa_doc.extracted_text = text
+                db.commit()
+        except Exception:
+            pass
+    if not oa_doc.extracted_text:
         raise HTTPException(status_code=400, detail="未找到 OA 通知书文本，请先上传并解析")
 
     if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY == "your-deepseek-api-key-here":
@@ -345,11 +359,22 @@ async def suggest_strategies(case_id: int, db: Session = Depends(get_db)):
     if not case:
         raise HTTPException(status_code=404, detail="案件不存在")
 
-    # 收集所有文档文本
+    # 收集所有文档文本（大文件按需解析）
     docs = db.query(Document).filter(Document.case_id == case_id).all()
     doc_texts = {}
     for d in docs:
-        doc_texts[d.doc_type] = d.extracted_text or ""
+        text = d.extracted_text or ""
+        if not text and d.stored_path:
+            try:
+                pdf_parser = PDFParser()
+                result = pdf_parser.parse(d.stored_path)
+                text = result.get("full_text", "")
+                if text:
+                    d.extracted_text = text
+                    db.commit()
+            except Exception:
+                pass
+        doc_texts[d.doc_type] = text
 
     if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY == "your-deepseek-api-key-here":
         raise HTTPException(status_code=400, detail="未配置 DeepSeek API Key")
@@ -386,7 +411,18 @@ async def generate_doc(case_id: int, body: GenerateDocRequest, db: Session = Dep
     docs = db.query(Document).filter(Document.case_id == case_id).all()
     doc_texts = {}
     for d in docs:
-        doc_texts[d.doc_type] = d.extracted_text or ""
+        text = d.extracted_text or ""
+        if not text and d.stored_path:
+            try:
+                pdf_parser = PDFParser()
+                result = pdf_parser.parse(d.stored_path)
+                text = result.get("full_text", "")
+                if text:
+                    d.extracted_text = text
+                    db.commit()
+            except Exception:
+                pass
+        doc_texts[d.doc_type] = text
 
     try:
         # 1. 构建固定模板（优先用前端确认的区别特征）
