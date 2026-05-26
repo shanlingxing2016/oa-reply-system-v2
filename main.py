@@ -1,6 +1,6 @@
 import uvicorn
 import traceback
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from contextlib import asynccontextmanager
@@ -8,7 +8,8 @@ from pathlib import Path
 import os
 
 from config import HOST, PORT
-from database import init_db
+from database import init_db, SessionLocal
+from models import Case, Document, Comparison, GeneratedDocument
 from routers import auth, cases, documents, comparisons, analysis
 
 BASE_DIR = Path(__file__).parent
@@ -51,6 +52,55 @@ if static_dir.exists():
 @app.get("/")
 def index():
     return FileResponse(str(BASE_DIR / "templates" / "index.html"))
+
+
+@app.post("/api/admin/reset")
+def reset_database():
+    """清空所有数据（案件、文档、比对表、生成文档）"""
+    db = SessionLocal()
+    try:
+        count_cases = db.query(Case).count()
+        count_docs = db.query(Document).count()
+        count_comps = db.query(Comparison).count()
+        count_gen = db.query(GeneratedDocument).count()
+        db.query(GeneratedDocument).delete()
+        db.query(Comparison).delete()
+        db.query(Document).delete()
+        db.query(Case).delete()
+        db.commit()
+        return {
+            "ok": True,
+            "message": "数据库已清空",
+            "deleted": {
+                "cases": count_cases,
+                "documents": count_docs,
+                "comparisons": count_comps,
+                "generated_docs": count_gen,
+            }
+        }
+    except Exception as e:
+        db.rollback()
+        return JSONResponse(status_code=500, content={"detail": f"清库失败: {str(e)}"})
+    finally:
+        db.close()
+
+
+@app.delete("/api/admin/delete-case/{case_id}")
+def delete_single_case(case_id: int):
+    """删除单个案件及其关联数据"""
+    db = SessionLocal()
+    try:
+        case = db.query(Case).filter(Case.id == case_id).first()
+        if not case:
+            raise HTTPException(status_code=404, detail="案件不存在")
+        db.delete(case)
+        db.commit()
+        return {"ok": True, "message": "案件已删除"}
+    except Exception as e:
+        db.rollback()
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
