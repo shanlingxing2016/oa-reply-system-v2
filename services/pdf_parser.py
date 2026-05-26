@@ -188,25 +188,25 @@ class PDFParser:
             client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
             all_text = []
 
-            # 流式处理：每次只从 PDF 中提取 BATCH_SIZE 页，OCR后立即释放
-            BATCH_SIZE = 2  # 减小批次，降低单次内存峰值
+            # 流式处理：每次只从 PDF 中提取 1 页，OCR后立即释放
+            BATCH_SIZE = 1  # Render 512MB 下每批仅 1 页
             for batch_start in range(0, MAX_PAGES, BATCH_SIZE):
                 batch_end = min(batch_start + BATCH_SIZE, MAX_PAGES)
                 content = [{"type": "text", "text": "请完整提取以下文档图片中的所有文字内容，保持原始格式和段落结构。不要遗漏任何文字，包括页眉页脚。直接输出提取的文字，不要加任何说明。"}]
 
                 for page_idx in range(batch_start, batch_end):
                     page = reader.pages[page_idx]
-                    img = self._render_page_to_image(page, page_idx)
+                    img = self._render_page_to_image(page, page_idx, pdf_path)
                     if img is None:
                         continue
 
-                    # 大幅压缩：max 900px, JPEG quality 40
+                    # 大幅压缩：max 800px, JPEG quality 35
                     w, h = img.size
-                    if w > 900:
-                        ratio = 900 / w
-                        img = img.resize((900, int(h * ratio)), Image.Resampling.LANCZOS)
+                    if w > 800:
+                        ratio = 800 / w
+                        img = img.resize((800, int(h * ratio)), Image.Resampling.LANCZOS)
                     buf = io.BytesIO()
-                    img.save(buf, format="JPEG", quality=40, optimize=True)
+                    img.save(buf, format="JPEG", quality=35, optimize=True)
                     b64 = base64.b64encode(buf.getvalue()).decode()
                     content.append({
                         "type": "image_url",
@@ -239,8 +239,10 @@ class PDFParser:
             traceback.print_exc()
             return f"[OCR解析异常: {str(e)[:200]}]"
 
-    def _render_page_to_image(self, page, page_num: int) -> 'Image.Image | None':
-        """将单页 PDF 渲染为 PIL Image（无 poppler 依赖）"""
+    def _render_page_to_image(self, page, page_num: int, pdf_path: str = "") -> 'Image.Image | None':
+        """将单页 PDF 渲染为 PIL Image。
+        方法1: pypdf 提取嵌入图片
+        方法2: PyMuPDF(fitz) 原生渲染（逐页，不预加载，内存友好）"""
         from PIL import Image
 
         # 方法1: 提取嵌入图片
@@ -270,7 +272,32 @@ class PDFParser:
         except Exception:
             pass
 
+        # 方法2: PyMuPDF 原生渲染（能处理矢量PDF、扫描件等任何格式）
+        if pdf_path:
+            try:
+                return self._fitz_render_page(pdf_path, page_num)
+            except Exception:
+                pass
+
         return None
+
+    def _fitz_render_page(self, pdf_path: str, page_num: int) -> 'Image.Image | None':
+        """用 PyMuPDF 渲染单页（按需打开文件，用完立即关闭）"""
+        import fitz
+        from PIL import Image
+
+        doc = fitz.open(pdf_path)
+        try:
+            if page_num >= len(doc):
+                return None
+            page = doc[page_num]
+            # 渲染为 150 DPI 的 pixmap（足够 OCR，不过大）
+            mat = fitz.Matrix(150 / 72, 150 / 72)
+            pix = page.get_pixmap(matrix=mat, colorspace="rgb")
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            return img
+        finally:
+            doc.close()
 
     def parse_docx(self, file_path: str) -> Dict:
         import docx2txt
