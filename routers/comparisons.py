@@ -149,6 +149,7 @@ async def ai_analyze(case_id: int, db: Session = Depends(get_db)):
     docs = db.query(Document).filter(Document.case_id == case_id).all()
     pdf_parser = PDFParser()
     doc_texts = {}
+    parse_errors = {}
     for d in docs:
         text = d.extracted_text or ""
         if not text and d.stored_path:
@@ -158,8 +159,10 @@ async def ai_analyze(case_id: int, db: Session = Depends(get_db)):
                 if text:
                     d.extracted_text = text
                     db.commit()
-            except Exception:
-                pass
+                else:
+                    parse_errors[d.doc_type] = f"{d.original_filename} 解析结果为空"
+            except Exception as e:
+                parse_errors[d.doc_type] = f"{d.original_filename} 解析失败: {str(e)[:100]}"
         doc_texts[d.doc_type] = text
 
     patent_text = doc_texts.get("patent", "")
@@ -168,7 +171,15 @@ async def ai_analyze(case_id: int, db: Session = Depends(get_db)):
     oa_text = doc_texts.get("oa", "")
 
     if not patent_text or not d1_text:
-        raise HTTPException(status_code=400, detail="请先上传本申请文件和 D1 对比文件")
+        # 给出具体哪个文件缺失或解析失败
+        missing = []
+        if not patent_text:
+            err = parse_errors.get("patent", "")
+            missing.append("本申请文件" + ("（"+err+"）" if err else "：未上传或未解析"))
+        if not d1_text:
+            err = parse_errors.get("d1", "")
+            missing.append("D1对比文件" + ("（"+err+"）" if err else "：未上传或未解析"))
+        raise HTTPException(status_code=400, detail="；".join(missing))
 
     try:
         ai = AIService()
