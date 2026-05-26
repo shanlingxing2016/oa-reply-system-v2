@@ -32,17 +32,10 @@ class PDFParser:
 
         full_text = "\n\n".join(p["content"] for p in pages)
 
-        # 如果 pypdf 提取不到文字，尝试 OCR
+        # 如果 pypdf 提取不到文字，尝试 OCR（返回原始文本即可，不做页级拆分）
         if not full_text.strip():
             full_text = self._ocr_pdf(file_path)
-            if full_text.strip():
-                # OCR 成功，按页重新组织
-                pages = []
-                for i, block in enumerate(full_text.split("\n\n--- 第{}页 ---\n\n".format(""))):
-                    if block.strip():
-                        pages.append({"page": i + 1, "content": block.strip()})
-                if not pages:
-                    pages = [{"page": 1, "content": full_text.strip()}]
+            pages = [{"page": 1, "content": full_text.strip()}] if full_text.strip() else []
             total_pages = len(reader.pages)
         else:
             total_pages = len(reader.pages)
@@ -177,50 +170,107 @@ class PDFParser:
         return None
 
     def _ocr_pdf(self, pdf_path: str) -> str:
-        """用 DeepSeek 多模态 API 对扫描件 PDF 做 OCR"""
+        """用 DeepSeek 多模态 API 对扫描件 PDF 做 OCR
+        关键优化：流式处理，每批提取→OCR→释放内存，避免 OOM"""
         try:
             from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
             from openai import OpenAI
+            from PIL import Image
+            from pypdf import PdfReader
 
             if not DEEPSEEK_API_KEY:
                 return ""
 
-            images = self._extract_images_from_pdf(pdf_path)
-            if not images:
-                return ""
+            reader = PdfReader(pdf_path)
+            total_pages = len(reader.pages)
+            MAX_PAGES = min(total_pages, 30)  # 最多30页
 
             client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
             all_text = []
 
-            # 每次最多发送 3 张图片（避免 token 超限）
-            batch_size = 3
-            for batch_start in range(0, len(images), batch_size):
-                batch = images[batch_start:batch_start + batch_size]
+            # 流式处理：每次只从 PDF 中提取 BATCH_SIZE 页，OCR后立即释放
+            BATCH_SIZE = 2  # 减小批次，降低单次内存峰值
+            for batch_start in range(0, MAX_PAGES, BATCH_SIZE):
+                batch_end = min(batch_start + BATCH_SIZE, MAX_PAGES)
                 content = [{"type": "text", "text": "请完整提取以下文档图片中的所有文字内容，保持原始格式和段落结构。不要遗漏任何文字，包括页眉页脚。直接输出提取的文字，不要加任何说明。"}]
-                for img in batch:
+
+                for page_idx in range(batch_start, batch_end):
+                    page = reader.pages[page_idx]
+                    img = self._render_page_to_image(page, page_idx)
+                    if img is None:
+                        continue
+
+                    # 大幅压缩：max 900px, JPEG quality 40
+                    w, h = img.size
+                    if w > 900:
+                        ratio = 900 / w
+                        img = img.resize((900, int(h * ratio)), Image.Resampling.LANCZOS)
                     buf = io.BytesIO()
-                    img.save(buf, format="PNG", quality=85)
+                    img.save(buf, format="JPEG", quality=40, optimize=True)
                     b64 = base64.b64encode(buf.getvalue()).decode()
                     content.append({
                         "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{b64}"
-                        }
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
                     })
 
-                resp = client.chat.completions.create(
-                    model="deepseek-chat",
-                    messages=[{"role": "user", "content": content}],
-                    temperature=0.1,
-                    max_tokens=8000,
-                )
-                page_text = resp.choices[0].message.content or ""
-                all_text.append(f"--- 第{batch_start + 1}页 ---\n\n{page_text}")
+                # 如果这批没有任何图片（也没有文字），跳过
+                if len(content) <= 1:
+                    all_text.append(f"--- 第{batch_start + 1}-{batch_end}页 ---\n\n（无可提取文字）")
+                    continue
+
+                try:
+                    resp = client.chat.completions.create(
+                        model="deepseek-chat",
+                        messages=[{"role": "user", "content": content}],
+                        temperature=0.1,
+                        max_tokens=8000,
+                        timeout=90,
+                    )
+                    page_text = resp.choices[0].message.content or ""
+                except Exception as e:
+                    page_text = f"[API调用失败: {str(e)[:100]}]"
+
+                all_text.append(f"--- 第{batch_start + 1}-{batch_end}页 ---\n\n{page_text}")
 
             return "\n\n".join(all_text)
 
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return f"[OCR解析异常: {str(e)[:200]}]"
+
+    def _render_page_to_image(self, page, page_num: int) -> 'Image.Image | None':
+        """将单页 PDF 渲染为 PIL Image（无 poppler 依赖）"""
+        from PIL import Image
+
+        # 方法1: 提取嵌入图片
+        try:
+            if '/XObject' in page.get('/Resources', {}):
+                xobjects = page['/Resources']['/XObject'].get_object()
+                page_images = []
+                for obj_name in xobjects:
+                    xobj = xobjects[obj_name].get_object()
+                    if xobj.get('/Subtype') == '/Image':
+                        img = self._xobject_to_pil(xobj)
+                        if img:
+                            page_images.append(img)
+                if page_images:
+                    if len(page_images) == 1:
+                        return page_images[0]
+                    # 多图拼接
+                    page_images.sort(key=lambda im: im.size[1], reverse=True)
+                    total_h = sum(im.size[1] for im in page_images)
+                    max_w = max(im.size[0] for im in page_images)
+                    combined = Image.new('RGB', (max_w, total_h), 'white')
+                    y = 0
+                    for im in page_images:
+                        combined.paste(im, (0, y))
+                        y += im.size[1]
+                    return combined
         except Exception:
-            return ""
+            pass
+
+        return None
 
     def parse_docx(self, file_path: str) -> Dict:
         import docx2txt
