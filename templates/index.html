@@ -1108,6 +1108,11 @@ async function aiAnalyze() {
   btn.textContent = '🤖 AI 分析中...';
   try {
     var resp = await api('POST', '/api/cases/'+CASE_ID+'/comparisons/ai-analyze', {});
+    if (!resp.ok) {
+      var errData = null;
+      try { errData = await resp.json(); } catch(_) {}
+      throw new Error((errData && errData.detail) || '服务器错误 HTTP ' + resp.status);
+    }
     var data = await resp.json();
     // 重新加载比对表
     var res = await api('GET', '/api/cases/'+CASE_ID+'/comparisons');
