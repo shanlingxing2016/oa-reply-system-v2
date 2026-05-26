@@ -209,3 +209,15 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
     db.delete(doc)
     db.commit()
     return {"message": "已删除"}
+
+
+@router.put("/documents/{doc_id}/text")
+def set_document_text(doc_id: int, data: dict, db: Session = Depends(get_db)):
+    """手动设置文档文本（用于大文件无法自动 OCR 时的兜底）"""
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    text = (data.get("text") or "").strip()
+    doc.extracted_text = text if text else None
+    db.commit()
+    return {"ok": True, "doc_type": doc.doc_type, "length": len(text)}
