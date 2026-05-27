@@ -1467,35 +1467,42 @@ function boldSelection() {
   document.execCommand('bold', false, null);
 }
 function exportCompTable() {
-  var BOM = '\uFEFF';
-  var lines = [];
+  if (typeof XLSX === 'undefined') { alert('正在加载导出库，请稍后重试'); return; }
+
+  var wb = XLSX.utils.book_new();
+  wb.Props = { Title: '特征比对表', Subject: 'OA答复', Author: 'OA答复系统' };
 
   // ---- 表一：技术特征对比表 ----
-  lines.push('=== 表一：技术特征对比表 ===');
-  lines.push('权利要求\t技术特征\tD1引用位置\tD1公开内容\t公开状态\t对比分析');
+  var t1Data = [['权利要求', '技术特征', 'D1引用位置', 'D1公开内容', '公开状态', '对比分析']];
   state.compRows.forEach(function(r) {
-    lines.push([r.claim||'', r.feature||'', r.ref_position||'', r.ref_content||'', r.pub_status||'', r.analysis||''].join('\t'));
+    t1Data.push([r.claim||'', r.feature||'', r.ref_position||'', r.ref_content||'', r.pub_status||'', r.analysis||'']);
   });
+  var ws1 = XLSX.utils.aoa_to_sheet(t1Data);
+  // 列宽
+  ws1['!cols'] = [{wch:14}, {wch:50}, {wch:20}, {wch:50}, {wch:10}, {wch:60}];
+  XLSX.utils.book_append_sheet(wb, ws1, '表一 技术特征对比表');
 
   // ---- 表二：区别技术特征验证表 ----
-  lines.push('');
-  lines.push('=== 表二：区别技术特征验证表 ===');
-  lines.push('序号\t区别技术特征\t对比文件\t引用位置\t公开内容\t公开状态\t对比分析');
+  var t2Data = [['序号', '区别技术特征', '对比文件', '引用位置', '公开内容', '公开状态', '对比分析']];
   (state.comp2Rows||[]).forEach(function(r) {
-    lines.push([r.diff_no||'', r.feature||'', r.ref_document||'', r.ref_position||'', r.ref_content||'', r.pub_status||'', r.analysis||''].join('\t'));
+    t2Data.push([r.diff_no||'', r.feature||'', r.ref_document||'', r.ref_position||'', r.ref_content||'', r.pub_status||'', r.analysis||'']);
   });
+  var ws2 = XLSX.utils.aoa_to_sheet(t2Data);
+  ws2['!cols'] = [{wch:8}, {wch:50}, {wch:10}, {wch:20}, {wch:50}, {wch:10}, {wch:60}];
+  XLSX.utils.book_append_sheet(wb, ws2, '表二 区别特征验证表');
 
   // ---- 效果表：技术效果比对表 ----
-  lines.push('');
-  lines.push('=== 技术效果比对表 ===');
-  lines.push('技术效果\t本申请位置\t本申请数值\t对比文件\t对比文件位置\t对比文件数值\t公开内容\t公开状态\t对比分析');
+  var efData = [['技术效果', '本申请位置', '本申请数值', '对比文件', '对比文件位置', '对比文件数值', '公开内容', '公开状态', '对比分析']];
   (state.effectRows||[]).forEach(function(r) {
-    lines.push([r.feature||'', r.app_position||'', r.app_value||'', r.ref_document||'', r.ref_position||'', r.ref_value||'', r.ref_content||'', r.pub_status||'', r.analysis||''].join('\t'));
+    efData.push([r.feature||'', r.app_position||'', r.app_value||'', r.ref_document||'', r.ref_position||'', r.ref_value||'', r.ref_content||'', r.pub_status||'', r.analysis||'']);
   });
+  var ws3 = XLSX.utils.aoa_to_sheet(efData);
+  ws3['!cols'] = [{wch:40}, {wch:16}, {wch:14}, {wch:10}, {wch:16}, {wch:14}, {wch:40}, {wch:10}, {wch:60}];
+  XLSX.utils.book_append_sheet(wb, ws3, '效果表 技术效果比对');
 
-  var blob = new Blob([BOM + lines.join('\n')], {type:'text/tab-separated-values;charset=utf-8'});
-  var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '特征比对表.tsv'; a.click();
+  XLSX.writeFile(wb, '特征比对表.xlsx');
 }
 </script>
+<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </body>
 </html>
