@@ -44,6 +44,10 @@ class BatchSaveRequest(BaseModel):
     rows: List[ComparisonCreate]
 
 
+class Table2AnalyzeRequest(BaseModel):
+    diff_features: Optional[List[dict]] = None
+
+
 @router.get("")
 def get_comparisons(case_id: int, db: Session = Depends(get_db)):
     case = db.query(Case).filter(Case.id == case_id).first()
@@ -295,7 +299,7 @@ async def ai_analyze(case_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/ai-analyze-table2")
-async def ai_analyze_table2(case_id: int, db: Session = Depends(get_db)):
+async def ai_analyze_table2(case_id: int, body: Table2AnalyzeRequest = None, db: Session = Depends(get_db)):
     """AI 独立分析表二：验证区别技术特征是否被 D2/D3 公开"""
     case = db.query(Case).filter(Case.id == case_id).first()
     if not case:
@@ -304,40 +308,50 @@ async def ai_analyze_table2(case_id: int, db: Session = Depends(get_db)):
     if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY == "":
         raise HTTPException(status_code=400, detail="未配置 DeepSeek API Key")
 
-    # 获取当前表二的特征列表
-    table2_rows = (
-        db.query(Comparison)
-        .filter(Comparison.case_id == case_id, Comparison.table_type == "table2")
-        .order_by(Comparison.sort_order)
-        .all()
-    )
-
-    if not table2_rows:
-        # 如果表二为空，从表一提取区别特征临时构建
-        t1_rows = (
+    # 优先使用前端传入的当前 diff_features，防止数据库数据与前端不一致
+    if body and body.diff_features:
+        diff_features = []
+        circled = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+        for i, f in enumerate(body.diff_features):
+            diff_features.append({
+                "diff_no": f.get("diff_no") or (circled[i] if i < len(circled) else str(i + 1)),
+                "feature": f.get("feature") or "",
+            })
+    else:
+        # 获取当前表二的特征列表
+        table2_rows = (
             db.query(Comparison)
-            .filter(Comparison.case_id == case_id, Comparison.table_type == "table1")
+            .filter(Comparison.case_id == case_id, Comparison.table_type == "table2")
             .order_by(Comparison.sort_order)
             .all()
         )
-        diff_features = []
-        circled = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
-        idx = 0
-        for r in t1_rows:
-            if r.pub_status in ("no", "part"):
-                diff_features.append({
-                    "diff_no": circled[idx] if idx < len(circled) else str(idx + 1),
+
+        if not table2_rows:
+            # 如果表二为空，从表一提取区别特征临时构建
+            t1_rows = (
+                db.query(Comparison)
+                .filter(Comparison.case_id == case_id, Comparison.table_type == "table1")
+                .order_by(Comparison.sort_order)
+                .all()
+            )
+            diff_features = []
+            circled = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+            idx = 0
+            for r in t1_rows:
+                if r.pub_status in ("no", "part"):
+                    diff_features.append({
+                        "diff_no": circled[idx] if idx < len(circled) else str(idx + 1),
+                        "feature": r.feature or "",
+                    })
+                    idx += 1
+        else:
+            diff_features = [
+                {
+                    "diff_no": r.diff_no or "",
                     "feature": r.feature or "",
-                })
-                idx += 1
-    else:
-        diff_features = [
-            {
-                "diff_no": r.diff_no or "",
-                "feature": r.feature or "",
-            }
-            for r in table2_rows
-        ]
+                }
+                for r in table2_rows
+            ]
 
     if not diff_features:
         raise HTTPException(status_code=400, detail="没有区别技术特征可以分析，请先填写表一")
