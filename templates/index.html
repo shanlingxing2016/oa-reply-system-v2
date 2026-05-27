@@ -1467,9 +1467,33 @@ function boldSelection() {
   document.execCommand('bold', false, null);
 }
 function exportCompTable() {
-  var lines = ['权利要求\t技术特征\tD1引用位置\tD1公开内容\t公开状态\t对比分析'];
-  state.compRows.forEach(function(r) { lines.push([r.claim,r.feature,r.ref_position,r.ref_content,r.pub_status,r.analysis].join('\t')); });
-  var blob = new Blob([lines.join('\n')], {type:'text/tab-separated-values;charset=utf-8'});
+  var BOM = '\uFEFF';
+  var lines = [];
+
+  // ---- 表一：技术特征对比表 ----
+  lines.push('=== 表一：技术特征对比表 ===');
+  lines.push('权利要求\t技术特征\tD1引用位置\tD1公开内容\t公开状态\t对比分析');
+  state.compRows.forEach(function(r) {
+    lines.push([r.claim||'', r.feature||'', r.ref_position||'', r.ref_content||'', r.pub_status||'', r.analysis||''].join('\t'));
+  });
+
+  // ---- 表二：区别技术特征验证表 ----
+  lines.push('');
+  lines.push('=== 表二：区别技术特征验证表 ===');
+  lines.push('序号\t区别技术特征\t对比文件\t引用位置\t公开内容\t公开状态\t对比分析');
+  (state.comp2Rows||[]).forEach(function(r) {
+    lines.push([r.diff_no||'', r.feature||'', r.ref_document||'', r.ref_position||'', r.ref_content||'', r.pub_status||'', r.analysis||''].join('\t'));
+  });
+
+  // ---- 效果表：技术效果比对表 ----
+  lines.push('');
+  lines.push('=== 技术效果比对表 ===');
+  lines.push('技术效果\t本申请位置\t本申请数值\t对比文件\t对比文件位置\t对比文件数值\t公开内容\t公开状态\t对比分析');
+  (state.effectRows||[]).forEach(function(r) {
+    lines.push([r.feature||'', r.app_position||'', r.app_value||'', r.ref_document||'', r.ref_position||'', r.ref_value||'', r.ref_content||'', r.pub_status||'', r.analysis||''].join('\t'));
+  });
+
+  var blob = new Blob([BOM + lines.join('\n')], {type:'text/tab-separated-values;charset=utf-8'});
   var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '特征比对表.tsv'; a.click();
 }
 </script>
