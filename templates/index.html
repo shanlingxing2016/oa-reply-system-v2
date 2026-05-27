@@ -342,6 +342,19 @@
   </div>
 </div>
 
+<!-- ===== 粘贴文本对话框 ===== -->
+<div id="pasteTextDialog" class="modal-overlay" style="display:none" onclick="if(event.target===this)closePasteText()">
+  <div class="modal-card" style="max-width:600px">
+    <div class="card-title" style="margin-bottom:8px">手动输入文本 - <span id="pasteTextTitle"></span></div>
+    <div style="font-size:12px;color:#888;margin-bottom:8px">大文件无法自动 OCR 时，可在此粘贴文档的文本内容</div>
+    <textarea id="pasteTextInput" style="width:100%;height:300px;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:inherit;resize:vertical"></textarea>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn" onclick="closePasteText()">取消</button>
+      <button class="btn btn-primary" onclick="savePasteText()">保存文本</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== Global State =====
 var TOKEN = localStorage.getItem('oa_token') || '';
@@ -473,6 +486,29 @@ async function clearDatabase() {
   loadCaseList();
 }
 
+var _pasteDocId = null, _pasteDocType = '';
+function openPasteText(docId, docTypeName) {
+  _pasteDocId = docId;
+  _pasteDocType = docTypeName;
+  document.getElementById('pasteTextTitle').textContent = docTypeName;
+  document.getElementById('pasteTextInput').value = '';
+  document.getElementById('pasteTextDialog').style.display = '';
+}
+function closePasteText() {
+  document.getElementById('pasteTextDialog').style.display = 'none';
+  _pasteDocId = null;
+}
+async function savePasteText() {
+  var text = document.getElementById('pasteTextInput').value.trim();
+  if (!text) { alert('请粘贴文本内容'); return; }
+  var resp = await api('PUT', '/api/documents/' + _pasteDocId + '/text', {text: text});
+  if (!resp.ok) { alert('保存失败: ' + (await resp.json()).detail); return; }
+  closePasteText();
+  alert(_pasteDocType + ' 文本已保存（' + Math.round(text.length/1000) + 'k字）');
+  // 刷新页面显示最新状态
+  if (CASE_ID) openCase(CASE_ID);
+}
+
 async function createNewCase() {
   var cn = document.getElementById('newCaseId').value.trim();
   var nm = document.getElementById('newCaseName').value.trim();
@@ -515,8 +551,13 @@ async function openCase(id) {
           var n = idx + 1;
           document.getElementById('uz'+n).classList.add('uploaded');
           document.getElementById('file'+n+'name').textContent = '✓ ' + d.original_filename;
-          var hint = d.extracted_text ? '已解析 (' + (d.extracted_text.length > 200 ? Math.round(d.extracted_text.length/1000)+'k字' : d.extracted_text.length+'字') + ')' : '待解析';
-          document.getElementById('file'+n+'hint').textContent = hint;
+          var hintHtml;
+          if (d.extracted_text) {
+            hintHtml = '已解析 (' + (d.extracted_text.length > 200 ? Math.round(d.extracted_text.length/1000)+'k字' : d.extracted_text.length+'字') + ')';
+          } else {
+            hintHtml = '待解析 <a href="javascript:void(0)" onclick="openPasteText('+d.id+',\''+DOC_TYPE_NAMES[d.doc_type]+'\')" style="color:#1a73e8;text-decoration:underline;font-size:12px">粘贴文本</a>';
+          }
+          document.getElementById('file'+n+'hint').innerHTML = hintHtml;
           document.getElementById('file'+n+'del').style.display = 'block';
         }
         // 回显模板文档
@@ -1049,6 +1090,15 @@ function syncTable2FromTable1() {
   diffFeatures.forEach(function(r, i) { r.diff_no = circled[i] || String(i+1); });
   state.comp2Rows = diffFeatures;
   renderComp2Table();
+
+  // 自动保存表二到数据库，防止前端与数据库不一致导致AI分析用过期数据
+  if (CASE_ID) {
+    api('POST', '/api/cases/'+CASE_ID+'/comparisons/batch', {
+      table_type: 'table2',
+      rows: state.comp2Rows.map(function(r) { return {diff_no:r.diff_no,feature:r.feature,ref_document:r.ref_document,ref_position:r.ref_position,ref_content:r.ref_content,pub_status:r.pub_status,analysis:r.analysis}; })
+    }).then(function(){ console.log('表二关联数据已自动保存'); })
+    .catch(function(e){ console.error('表二自动保存失败:', e); });
+  }
 }
 
 // 模糊匹配：基于特征文本重叠度在表二中查找匹配行
@@ -1153,7 +1203,9 @@ async function aiAnalyzeTable2() {
   btn.disabled = true;
   btn.textContent = '🤖 AI 正在分析表二...';
   try {
-    var resp = await api('POST', '/api/cases/'+CASE_ID+'/comparisons/ai-analyze-table2', {});
+    var resp = await api('POST', '/api/cases/'+CASE_ID+'/comparisons/ai-analyze-table2', {
+      diff_features: state.comp2Rows.map(function(r) { return {diff_no: r.diff_no || '', feature: r.feature || ''}; })
+    });
     var data = await resp.json();
     if (!resp.ok) { throw new Error(data.detail || '请求失败 (' + resp.status + ')'); }
     if (data.table2) {
