@@ -25,5 +25,8 @@ MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(50 * 1024 * 1024)))
 # 数据库（部署环境可用 DATABASE_URL 环境变量切换为 PostgreSQL）
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'data' / 'oa_reply.db'}")
 
+# 判断是否使用 PostgreSQL
+IS_POSTGRES = DATABASE_URL.startswith("postgresql") or DATABASE_URL.startswith("postgres")
+
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 (BASE_DIR / "data").mkdir(parents=True, exist_ok=True)
