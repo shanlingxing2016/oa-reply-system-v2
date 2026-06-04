@@ -1,3 +1,4 @@
+from pydantic import BaseModel
 class AttackDefenseRequest(BaseModel):
     case_id: int
     round_num: int = 1
