@@ -1,0 +1,112 @@
+// ========================================
+// templates/index.html JS 改动说明
+// ========================================
+//
+// 1. 替换 runAttackDefense 函数：
+//
+async function runAttackDefense() {
+    const caseId = state.currentCaseId;
+    if (!caseId) return alert('请先选择案件');
+
+    const card = document.getElementById('attackDefenseCard');
+    card.innerHTML = '<div class="text-center py-8"><div class="text-2xl mb-2">⚔️</div><div id="adStatus" class="text-gray-600">正在启动攻防迭代验证...</div><div class="w-full bg-gray-200 rounded-full h-2 mt-4"><div id="adProgress" class="bg-blue-500 h-2 rounded-full transition-all duration-500" style="width:0%"></div></div></div>';
+    card.classList.remove('hidden');
+
+    const allRounds = [];
+    const maxRounds = 3;
+
+    for (let i = 1; i <= maxRounds; i++) {
+        document.getElementById('adStatus').textContent = `正在运行第${i}轮审查...`;
+        document.getElementById('adProgress').style.width = `${(i - 1) / maxRounds * 100}%`;
+
+        try {
+            const resp = await fetch('/analysis/attack-defense-review', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ case_id: caseId, round_num: i, previous_results: allRounds })
+            });
+            const data = await resp.json();
+            allRounds.push(data);
+            document.getElementById('adProgress').style.width = `${i / maxRounds * 100}%`;
+        } catch (e) {
+            allRounds.push({ round: i, overall_score: 0, overall_verdict: '网络错误', vulnerabilities: [], strengths: [], summary: '请求失败' });
+        }
+    }
+
+    renderAttackDefenseRounds(allRounds);
+}
+
+
+// 2. 替换 renderAttackDefenseResult 为 renderAttackDefenseRounds：
+//
+function renderAttackDefenseRounds(rounds) {
+    const card = document.getElementById('attackDefenseCard');
+
+    // 最终评分
+    const lastRound = rounds[rounds.length - 1];
+    const score = lastRound.overall_score || 0;
+    const scoreColor = score >= 70 ? '#22c55e' : score >= 40 ? '#f59e0b' : '#ef4444';
+    const verdict = lastRound.overall_verdict || '';
+
+    let html = `
+        <div class="mb-4">
+            <div class="flex items-center justify-between mb-1">
+                <span class="font-medium">最终抗攻击能力评分</span>
+                <span class="text-lg font-bold" style="color:${scoreColor}">${score}/100</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-3">
+                <div class="h-3 rounded-full transition-all" style="width:${score}%;background:${scoreColor}"></div>
+            </div>
+            <p class="text-sm text-gray-600 mt-1">${verdict}</p>
+        </div>
+    `;
+
+    // 评分变化趋势
+    if (rounds.length > 1) {
+        html += '<div class="flex items-center gap-3 mb-4 text-sm">';
+        rounds.forEach((r, i) => {
+            const c = (r.overall_score || 0) >= 70 ? 'bg-green-100 text-green-700' : (r.overall_score || 0) >= 40 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700';
+            html += `<span class="px-2 py-1 rounded ${c}">第${i+1}轮: ${r.overall_score || 0}分</span>`;
+            if (i < rounds.length - 1) html += '<span>\u2192</span>';
+        });
+        html += '</div>';
+    }
+
+    // 逐轮展示漏洞
+    rounds.forEach((r, idx) => {
+        const vulns = r.vulnerabilities || [];
+        const strengths = r.strengths || [];
+        html += `
+            <div class="border rounded-lg p-3 mb-3 ${idx < rounds.length - 1 ? 'border-gray-200' : 'border-red-300 bg-red-50/30'}">
+                <h4 class="font-medium mb-2">第${r.round || idx + 1}轮审查结果
+                    <span class="text-sm font-normal text-gray-500 ml-2">${vulns.length}个漏洞</span></h4>
+        `;
+
+        if (vulns.length > 0) {
+            vulns.forEach(v => {
+                const sc = v.severity === 'high' ? 'bg-red-100 text-red-700' : v.severity === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700';
+                const scText = v.severity === 'high' ? '高' : v.severity === 'medium' ? '中' : '低';
+                html += `
+                    <div class="mb-2 p-2 bg-white rounded border text-sm">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="px-1.5 py-0.5 rounded text-xs ${sc}">${scText}</span>
+                            <span class="font-medium">${v.category || ''}</span>
+                        </div>
+                        <p class="text-gray-700 mb-1">${v.issue || ''}</p>
+                        ${v.suggestion ? `<p class="text-blue-600 text-xs">💡 ${v.suggestion}</p>` : ''}
+                    </div>
+                `;
+            });
+        } else {
+            html += '<p class="text-green-600 text-sm">✅ 本轮未发现新漏洞</p>';
+        }
+        html += '</div>';
+    });
+
+    // 总结
+    if (lastRound.summary) {
+        html += `<div class="bg-gray-50 rounded p-3 text-sm"><strong>总结：</strong>${lastRound.summary}</div>`;
+    }
+
+    card.innerHTML = html;
+}
