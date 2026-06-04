@@ -293,6 +293,34 @@
     </div>
   </div>
 
+  <!-- ===== 攻防迭代验证 ===== -->
+  <div class="card" style="border-left:3px solid #e74c3c" id="attackDefenseCard">
+    <div class="card-title">⚔ 攻防迭代验证
+      <span class="badge" style="background:#fff0f0;color:#e74c3c">AI 审查员攻击</span>
+    </div>
+    <div style="font-size:12px;color:#888;margin-bottom:12px">AI 以严格审查员视角攻击当前答复方案，找出可能被驳回的漏洞。建议在生成文档前先验证。</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn btn-sm" id="btnAttackDefense" onclick="runAttackDefense()" style="background:#e74c3c;color:#fff">⚔ 开始攻防验证</button>
+      <span style="color:#aaa;font-size:12px" id="adStatusHint"></span>
+    </div>
+    <div id="adResultPanel" style="display:none">
+      <!-- 评分概览 -->
+      <div id="adScoreBar" style="display:flex;align-items:center;gap:16px;padding:12px 16px;background:#f9f9f9;border-radius:8px;margin-bottom:16px;flex-wrap:wrap">
+        <div style="font-size:28px;font-weight:700" id="adScoreNum">--</div>
+        <div>
+          <div style="font-size:14px;font-weight:600" id="adVerdict">--</div>
+          <div style="font-size:12px;color:#888" id="adSummary">--</div>
+        </div>
+      </div>
+      <!-- 漏洞列表 -->
+      <div style="font-size:13px;font-weight:600;color:#e74c3c;margin-bottom:8px">发现的漏洞</div>
+      <div id="adVulnList"></div>
+      <!-- 优点 -->
+      <div style="font-size:13px;font-weight:600;color:#27ae60;margin-top:12px;margin-bottom:8px">方案优点</div>
+      <div id="adStrengths"></div>
+    </div>
+  </div>
+
   <div class="card" style="border-left:3px solid #e67e22">
     <div class="card-title">参考模板 <span class="badge">可选，用于参照格式风格</span></div>
     <div class="upload-grid">
@@ -921,6 +949,92 @@ function selectStrategy(code) {
   document.querySelectorAll('.strategy-card').forEach(function(el) {
     el.classList.toggle('selected', el.id === 'sc_'+code);
   });
+}
+
+// ===== 攻防迭代验证 =====
+async function runAttackDefense() {
+  var btn = document.getElementById('btnAttackDefense');
+  var hint = document.getElementById('adStatusHint');
+  btn.disabled = true; btn.textContent = '⚔ 验证中...';
+  hint.textContent = 'AI 审查员正在攻击当前方案...';
+  try {
+    var confirmedTechProblem = (document.getElementById('step5TechProblem') || {}).value || '';
+    var diffFeatures = (state.comp2Rows || []).filter(function(r) { return r.feature && r.feature.trim(); });
+    var resp = await api('POST', '/api/cases/'+CASE_ID+'/attack-defense-review', {
+      strategy: state.selectedStrategy || 'S3',
+      tech_problem: confirmedTechProblem,
+      diff_features: diffFeatures
+    });
+    if (resp.ok) {
+      var data = await resp.json();
+      renderAttackDefenseResult(data);
+      hint.textContent = '验证完成（第' + (data.round||1) + '轮）';
+    } else {
+      var err = await resp.json();
+      alert(err.detail || '攻防验证失败');
+      hint.textContent = '验证失败';
+    }
+  } catch(e) { alert('攻防验证失败: ' + e.message); hint.textContent = '网络错误'; }
+  btn.disabled = false; btn.textContent = '⚔ 开始攻防验证';
+}
+
+function renderAttackDefenseResult(data) {
+  var panel = document.getElementById('adResultPanel');
+  panel.style.display = 'block';
+
+  // 评分
+  var score = data.overall_score || 0;
+  var scoreEl = document.getElementById('adScoreNum');
+  scoreEl.textContent = score + '/100';
+  // 颜色
+  if (score >= 80) { scoreEl.style.color = '#27ae60'; }
+  else if (score >= 60) { scoreEl.style.color = '#e67e22'; }
+  else { scoreEl.style.color = '#e74c3c'; }
+
+  var verdict = data.overall_verdict || '--';
+  var verdictEl = document.getElementById('adVerdict');
+  verdictEl.textContent = verdict;
+  if (verdict === '优秀') { verdictEl.style.color = '#27ae60'; }
+  else if (verdict === '基本合格') { verdictEl.style.color = '#e67e22'; }
+  else { verdictEl.style.color = '#e74c3c'; }
+
+  document.getElementById('adSummary').textContent = data.summary || '';
+
+  // 漏洞
+  var vulns = data.vulnerabilities || [];
+  var vulnHtml = '';
+  if (!vulns.length) {
+    vulnHtml = '<div style="padding:8px;color:#27ae60;font-size:12px;background:#f0fff0;border-radius:6px">🎉 未发现明显漏洞，方案质量较高</div>';
+  } else {
+    vulns.forEach(function(v) {
+      var sevColor = v.severity === '高' ? '#e74c3c' : (v.severity === '中' ? '#e67e22' : '#95a5a6');
+      var sevBg = v.severity === '高' ? '#fff0f0' : (v.severity === '中' ? '#fff8f0' : '#f5f5f5');
+      vulnHtml += '<div style="border:1px solid ' + sevColor + '22;border-left:3px solid ' + sevColor + ';border-radius:6px;padding:12px;margin-bottom:10px;background:' + sevBg + '">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+        '<span style="font-size:14px">' + (v.icon || '⚪') + '</span>' +
+        '<span style="font-weight:600;font-size:13px">' + esc(v.category || '未分类') + '</span>' +
+        '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:' + sevColor + ';color:#fff">' + esc(v.severity || '未知') + '</span>' +
+        (v.target_feature ? '<span style="font-size:11px;color:#888;background:#f0f0f0;padding:2px 6px;border-radius:8px">目标：' + esc(v.target_feature) + '</span>' : '') +
+        '</div>' +
+        '<div style="font-size:12px;color:#333;margin-bottom:6px">' + esc(v.issue || '') + '</div>' +
+        (v.examiner_would_say ? '<div style="font-size:12px;color:#666;background:#fff;border:1px solid #eee;border-radius:4px;padding:8px;margin-bottom:6px"><b style="color:#e74c3c">审查员可能说：</b>' + esc(v.examiner_would_say) + '</div>' : '') +
+        (v.suggestion ? '<div style="font-size:12px;color:#27ae60"><b>💡 修复建议：</b>' + esc(v.suggestion) + '</div>' : '') +
+        '</div>';
+    });
+  }
+  document.getElementById('adVulnList').innerHTML = vulnHtml;
+
+  // 优点
+  var strengths = data.strengths || [];
+  var strHtml = '';
+  if (strengths.length) {
+    strengths.forEach(function(s) {
+      strHtml += '<div style="font-size:12px;color:#27ae60;padding:4px 0">✅ ' + esc(s) + '</div>';
+    });
+  } else {
+    strHtml = '<div style="font-size:12px;color:#aaa">（未列出优点）</div>';
+  }
+  document.getElementById('adStrengths').innerHTML = strHtml;
 }
 
 async function runAIGenerateDoc() {
