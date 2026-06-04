@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from database import get_db
-from models import Case, Document, ComparisonRow
+from models import Case, Document, Comparison
 from services import ai_service as ai
 
 router = APIRouter()
@@ -20,7 +20,7 @@ def attack_defense_review(body: AttackDefenseRequest, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="案件不存在")
 
     docs = db.query(Document).filter(Document.case_id == case.id).all()
-    comp_rows = db.query(ComparisonRow).filter(ComparisonRow.case_id == case.id).order_by(ComparisonRow.row_order).all()
+    comp_rows = db.query(Comparison).filter(Comparison.case_id == case.id).order_by(Comparison.row_order).all()
 
     case_data = {
         "documents": [{"original_filename": d.original_filename, "parsed_text": d.parsed_text} for d in docs],
