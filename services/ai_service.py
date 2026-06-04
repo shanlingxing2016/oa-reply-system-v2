@@ -108,6 +108,111 @@ OA 通知书摘要：
 请推荐答复策略。"""
         return await self._chat_json(system, user)
 
+    async def attack_defense_review(self, case_data: dict, round_num: int = 1, max_rounds: int = 1) -> dict:
+        """攻防迭代验证：角色B（审查员）以真实审查员视角攻击当前答复方案，找出漏洞。
+
+        架构支持多轮扩展：
+        - round_num=1: 角色B攻击，返回漏洞列表
+        - round_num=2: 角色A修正后角色B再次攻击（预留）
+        - round_num=3: 角色C（裁判）强制收敛，给出最终裁定（预留）
+
+        当前默认单轮（max_rounds=1），后续可改为 3 轮完整版。
+        """
+        diff_features = case_data.get("diff_features", [])
+        tech_problem = case_data.get("tech_problem", "")
+        rejection_reasons = case_data.get("rejection_reasons", "")
+        strategy = case_data.get("strategy", "S3")
+        d1_text = case_data.get("d1_text", "")[:4000]
+        d2_text = case_data.get("d2_text", "")[:3000]
+        patent_text = case_data.get("patent_text", "")[:6000]
+
+        features_text = ""
+        for i, f in enumerate(diff_features):
+            no = f.get("diff_no", str(i+1))
+            feat = f.get("feature", "")
+            d2_pub = f.get("pub_status", "")
+            d2_analysis = f.get("analysis", "")
+            d2_doc = f.get("ref_document", "D2")
+            features_text += f"\n--- 区别特征<%s> ---\n" % no
+            features_text += "特征内容：%s\n" % feat
+            features_text += "%s公开状态：%s\n" % (d2_doc, d2_pub)
+            features_text += "%s对比分析：%s\n" % (d2_doc, d2_analysis)
+
+        if round_num <= max_rounds and round_num % 2 == 1:
+            # 奇数轮 = 角色B（审查员）攻击
+            system = """你是一位严格的中国专利审查员（角色B），你的任务是**攻击**代理人提交的意见陈述方案，找出可以被驳回的漏洞。
+
+你精通以下攻击角度（"五把刀"）：
+1. 🔴 **效果无依据** — 技术效果在说明书中找不到实验数据支撑
+2. 🟠 **权利要求外特征** — 把实施例内容当权利要求特征来论证
+3. 🟡 **结合障碍说理不足** — 只说"本领域技术人员没有动机结合"但没给出具体理由
+4. 🟢 **技术偏见举证薄弱** — 仅引用单一文献证明技术偏见，孤证容易被驳回
+5. 🔵 **三步法循环论证** — 区别特征和预期效果互相证明，形成逻辑循环
+6. 🔷 **D2选择不恰当** — D2解决的技术问题与本申请不同，结合启示不存在
+7. 🟣 **数据对比不严谨** — 技术效果缺乏定量对比数据或实验条件不一致
+
+请以 JSON 格式返回：
+{
+  "overall_score": 75,
+  "overall_verdict": "需改进/基本合格/优秀",
+  "vulnerabilities": [
+    {
+      "id": 1,
+      "severity": "高/中/低",
+      "category": "攻击类别（如：效果无依据、结合障碍说理不足等）",
+      "icon": "🔴/🟠/🟡/🟢/🔵/🟣/🔷",
+      "target_feature": "针对的区别特征编号（如①）",
+      "issue": "具体漏洞描述（2-4句话）",
+      "examiner_would_say": "审查员可能如何反驳（用真实审查员话术）",
+      "suggestion": "修复建议"
+    }
+  ],
+  "strengths": ["方案优点1", "方案优点2"],
+  "summary": "总体评价（100字以内）"
+}
+
+注意：
+- severity 评标准：高=很可能导致驳回，中=审查员可能提出质疑，低=小问题
+- 至少检查5个维度，没有漏洞的维度可以不列出
+- 必须给出建设性修复建议
+- overall_score 范围 0-100"""
+
+            user = """请审查以下 OA 答复方案，以严格审查员视角攻击所有可能的漏洞：
+
+## 答复策略：%s
+## 本申请实际解决的技术问题：
+%s
+
+## 驳回理由：
+%s
+
+## 区别技术特征及对比分析：
+%s
+
+## 本申请权利要求及说明书摘要：
+%s
+
+## 对比文件 D1 摘要：
+%s
+
+## 对比文件 D2 摘要（如有）：
+%s
+
+请以严格审查员视角找出所有漏洞。""" % (
+                strategy, tech_problem,
+                rejection_reasons or "无",
+                features_text,
+                patent_text[:5000],
+                d1_text[:3000],
+                d2_text[:2000] or "无"
+            )
+            result = await self._chat_json(system, user)
+            result["round"] = round_num
+            result["role"] = "examiner"
+            return result
+        else:
+            return {"round": round_num, "role": "skip", "vulnerabilities": []}
+
     async def generate_opinion_letter(
         self,
         case_number: str,
