@@ -41,7 +41,7 @@ app.include_router(auth.router)
 app.include_router(cases.router)
 app.include_router(documents.router)
 app.include_router(comparisons.router)
-app.include_router(analysis.router)
+app.include_router(analysis.router, prefix="/analysis")
 
 # 静态文件
 static_dir = BASE_DIR / "static"
