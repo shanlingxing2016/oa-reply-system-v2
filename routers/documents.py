@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pathlib import Path
 import shutil
@@ -195,6 +196,26 @@ def get_document(doc_id: int, db: Session = Depends(get_db)):
         "original_filename": doc.original_filename,
         "extracted_text": doc.extracted_text,
     }
+
+
+@router.get("/documents/{doc_id}/file")
+def download_document_file(doc_id: int, db: Session = Depends(get_db)):
+    """下载原始文件"""
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    if not doc.stored_path:
+        raise HTTPException(status_code=404, detail="文件路径不存在")
+    p = Path(doc.stored_path)
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="文件已被清理，请重新上传")
+    # 还原原始文件名（含中文），让浏览器下载时显示正确文件名
+    filename = doc.original_filename or p.name
+    return FileResponse(
+        path=str(p),
+        filename=filename,
+        media_type="application/octet-stream",
+    )
 
 
 @router.delete("/documents/{doc_id}")
