@@ -1,3 +1,4 @@
+from services.attack_prompts import ATTACK_DIMENSIONS_PROMPT, ATTACK_OUTPUT_FORMAT
 import json
 import asyncio
 import re
