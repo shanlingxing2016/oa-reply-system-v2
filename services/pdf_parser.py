@@ -56,7 +56,7 @@ class PDFParser:
         return {"total_pages": total_pages, "full_text": full_text.strip(), "pages": pages}
 
     def _fitz_extract_text(self, pdf_path: str) -> str:
-        """用 PyMuPDF 提取 PDF 文本（含表格结构），极低内存"""
+        """用 PyMuPDF 提取 PDF 文本，自动识别表格结构并转为 Markdown 格式"""
         try:
             import fitz
             doc = fitz.open(pdf_path)
@@ -66,15 +66,122 @@ class PDFParser:
                 for i, page in enumerate(doc):
                     if i >= MAX_PAGES:
                         break
-                    # get_text("text") 保留基本结构，比 pypdf 强很多
-                    text = page.get_text("text")
-                    if text.strip():
-                        parts.append(text.strip())
-                return "\f".join(parts)  # \f = 换页符，方便后续按页拆分
+                    page_text = self._extract_page_with_tables(page)
+                    if page_text.strip():
+                        parts.append(page_text.strip())
+                return "\f".join(parts)
             finally:
                 doc.close()
         except Exception:
             return ""
+
+    def _extract_page_with_tables(self, page) -> str:
+        """提取单页文本，自动识别表格并转为 Markdown 表格格式"""
+        try:
+            import fitz
+
+            # 尝试用 find_tables() 识别表格（PyMuPDF 1.23+ 支持）
+            page_text = page.get_text("text")
+            try:
+                tabs = page.find_tables()
+                if tabs.tables:
+                    # 有表格：将页面内容分为"表格"和"普通文本"两部分分别处理
+                    # 先获取所有表格的 bbox 范围
+                    table_bboxes = [fitz.Rect(t.bbox) for t in tabs.tables]
+
+                    # 用 blocks 模式提取文字块，过滤掉表格区域内的文字
+                    blocks = page.get_text("blocks")
+                    non_table_lines = []
+                    for b in blocks:
+                        bx0, by0, bx1, by1, text, *_ = b
+                        block_rect = fitz.Rect(bx0, by0, bx1, by1)
+                        in_table = any(block_rect.intersects(tbr) for tbr in table_bboxes)
+                        if not in_table and text.strip():
+                            non_table_lines.append((by0, text.strip()))
+
+                    # 对非表格文字按 y 坐标排序
+                    non_table_lines.sort(key=lambda x: x[0])
+
+                    # 构建表格的 y 坐标（用于插入位置）
+                    table_entries = []
+                    for t in tabs.tables:
+                        try:
+                            rows = t.extract()
+                            md = self._table_to_markdown(rows)
+                            table_entries.append((t.bbox[1], md))  # bbox[1] = top y
+                        except Exception:
+                            pass
+
+                    # 合并所有元素，按 y 坐标排序
+                    all_elements = [(y, "TEXT", txt) for y, txt in non_table_lines]
+                    all_elements += [(y, "TABLE", md) for y, md in table_entries]
+                    all_elements.sort(key=lambda x: x[0])
+
+                    result_parts = []
+                    for _, kind, content in all_elements:
+                        result_parts.append(content)
+                    return "\n\n".join(result_parts)
+
+            except AttributeError:
+                # PyMuPDF 版本较旧，不支持 find_tables()，回退到自定义表格识别
+                pass
+
+            # 回退方案：用 blocks 模式按位置重构表格
+            return self._extract_with_blocks(page)
+
+        except Exception:
+            return page.get_text("text")
+
+    def _table_to_markdown(self, rows: list) -> str:
+        """将表格行列数据转为 Markdown 表格字符串"""
+        if not rows:
+            return ""
+        # 过滤全空行
+        rows = [[str(cell or "").strip() for cell in row] for row in rows]
+        rows = [row for row in rows if any(cell for cell in row)]
+        if not rows:
+            return ""
+
+        # 确保列数一致
+        max_cols = max(len(row) for row in rows)
+        rows = [row + [""] * (max_cols - len(row)) for row in rows]
+
+        lines = []
+        header = rows[0]
+        lines.append("| " + " | ".join(header) + " |")
+        lines.append("| " + " | ".join(["---"] * max_cols) + " |")
+        for row in rows[1:]:
+            lines.append("| " + " | ".join(row) + " |")
+        return "\n".join(lines)
+
+    def _extract_with_blocks(self, page) -> str:
+        """用 blocks 模式提取，按行列位置尝试还原表格结构（兼容旧版 PyMuPDF）"""
+        blocks = page.get_text("blocks")
+        if not blocks:
+            return page.get_text("text")
+
+        # 按 y 坐标（行）和 x 坐标（列）分组，检测疑似表格区域
+        from collections import defaultdict
+        import math
+
+        y_groups = defaultdict(list)
+        for b in blocks:
+            x0, y0, x1, y1, text, *_ = b
+            if text.strip():
+                # 将 y 坐标取整到最近 10px，模拟同一行
+                y_key = round(y0 / 10) * 10
+                y_groups[y_key].append((x0, text.strip()))
+
+        lines = []
+        for y_key in sorted(y_groups.keys()):
+            row_items = sorted(y_groups[y_key], key=lambda x: x[0])
+            if len(row_items) > 1:
+                # 多列：疑似表格行，用 tab 分隔
+                lines.append("\t".join(item[1] for item in row_items))
+            else:
+                lines.append(row_items[0][1])
+
+        return "\n".join(lines)
 
     def _extract_images_from_pdf(self, pdf_path: str) -> list:
         """从 PDF 提取每页为 Pillow Image，不依赖 poppler"""
@@ -226,7 +333,7 @@ class PDFParser:
             BATCH_SIZE = 1  # Render 512MB 下每批仅 1 页
             for batch_start in range(0, MAX_PAGES, BATCH_SIZE):
                 batch_end = min(batch_start + BATCH_SIZE, MAX_PAGES)
-                content = [{"type": "text", "text": "请完整提取以下文档图片中的所有文字内容，保持原始格式和段落结构。不要遗漏任何文字，包括页眉页脚。直接输出提取的文字，不要加任何说明。"}]
+                content = [{"type": "text", "text": "请完整提取以下文档图片中的所有文字内容，保持原始格式和段落结构。\n重要：如果图片中包含表格，请将表格转换为 Markdown 格式（使用 | 分隔列，第二行用 |---|---| 分隔表头和内容）输出，保持表格的行列结构不变。\n不要遗漏任何文字，包括页眉页脚。直接输出提取的文字，不要加任何说明。"}]
 
                 for page_idx in range(batch_start, batch_end):
                     page = reader.pages[page_idx]
