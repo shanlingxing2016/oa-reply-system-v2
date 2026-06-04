@@ -396,6 +396,69 @@ async def suggest_strategies(case_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"AI 策略推荐失败: {str(e)}")
 
 
+class AttackDefenseRequest(BaseModel):
+    strategy: Optional[str] = "S3"
+    tech_problem: Optional[str] = ""
+    diff_features: Optional[list] = None  # 当前确认的区别特征（含 analysis）
+    round_num: Optional[int] = 1
+    max_rounds: Optional[int] = 1
+
+
+@router.post("/attack-defense-review")
+async def attack_defense_review(case_id: int, body: AttackDefenseRequest, db: Session = Depends(get_db)):
+    """攻防迭代验证：AI 以审查员视角攻击当前答复方案，找出漏洞"""
+    case = db.query(Case).filter(Case.id == case_id).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="案件不存在")
+    if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY == "your-deepseek-api-key-here":
+        raise HTTPException(status_code=400, detail="未配置 DeepSeek API Key")
+
+    # 收集案件数据
+    docs = db.query(Document).filter(Document.case_id == case_id).all()
+    doc_texts = {}
+    for d in docs:
+        text = d.extracted_text or ""
+        doc_texts[d.doc_type] = text
+
+    # 驳回理由摘要
+    oa_text = doc_texts.get("oa", "")
+    rejection_reasons = ""
+    try:
+        import json
+        rej = json.loads(case.rejection_analysis or "{}")
+        if isinstance(rej.get("rejection_reasons"), list):
+            rejection_reasons = "\n".join(
+                f"- [{r.get('type', '')}] {r.get('description', '')}"
+                for r in rej["rejection_reasons"]
+            )
+    except Exception:
+        pass
+
+    case_data = {
+        "case_number": case.case_number or "",
+        "case_name": case.case_name or "",
+        "rejection_reasons": rejection_reasons,
+        "oa_text": oa_text,
+        "patent_text": doc_texts.get("patent", ""),
+        "d1_text": doc_texts.get("d1", ""),
+        "d2_text": doc_texts.get("d2", ""),
+        "tech_problem": body.tech_problem or "",
+        "strategy": body.strategy or "S3",
+        "diff_features": body.diff_features or [],
+    }
+
+    ai = AIService()
+    try:
+        result = await ai.attack_defense_review(
+            case_data,
+            round_num=body.round_num or 1,
+            max_rounds=body.max_rounds or 1,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"攻防验证失败: {str(e)}")
+
+
 @router.post("/generate-doc")
 async def generate_doc(case_id: int, body: GenerateDocRequest, db: Session = Depends(get_db)):
     """方案A：模板预填充方式生成意见陈述书。
