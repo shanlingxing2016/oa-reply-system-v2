@@ -100,21 +100,30 @@
         <div class="uz-icon">📄</div><div class="uz-title">审查意见通知书</div><div class="uz-hint">OA 通知书</div>
         <div class="uz-file" id="file1name"></div>
         <div class="uz-file-hint" id="file1hint"></div>
-        <div class="uz-del" id="file1del" onclick="removeFile(event,1)" style="display:none">✕ 移除</div>
+        <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+          <div class="uz-del" id="file1del" onclick="removeFile(event,1)" style="display:none">✕ 移除</div>
+          <div class="uz-view" id="file1view" onclick="viewFileText(event,1)" style="display:none;cursor:pointer;font-size:11px;color:#1a4fa0;padding:2px 8px;border:1px solid #1a4fa0;border-radius:10px;background:#f0f4ff">📖 查看文本</div>
+        </div>
       </div>
       <div class="upload-zone" id="uz2" onclick="triggerUpload(2)" ondragover="onDragOver(event,2)" ondragleave="onDragLeave(event,2)" ondrop="onDrop(event,2)">
         <input type="file" id="file2" accept=".pdf,.doc,.docx" onchange="uploadFile(2,this)">
         <div class="uz-icon">📋</div><div class="uz-title">申请文件</div><div class="uz-hint">权利要求书 + 说明书</div>
         <div class="uz-file" id="file2name"></div>
         <div class="uz-file-hint" id="file2hint"></div>
-        <div class="uz-del" id="file2del" onclick="removeFile(event,2)" style="display:none">✕ 移除</div>
+        <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+          <div class="uz-del" id="file2del" onclick="removeFile(event,2)" style="display:none">✕ 移除</div>
+          <div class="uz-view" id="file2view" onclick="viewFileText(event,2)" style="display:none;cursor:pointer;font-size:11px;color:#1a4fa0;padding:2px 8px;border:1px solid #1a4fa0;border-radius:10px;background:#f0f4ff">📖 查看文本</div>
+        </div>
       </div>
       <div class="upload-zone" id="uz3" onclick="triggerUpload(3)" ondragover="onDragOver(event,3)" ondragleave="onDragLeave(event,3)" ondrop="onDrop(event,3)">
         <input type="file" id="file3" accept=".pdf,.doc,.docx" onchange="uploadFile(3,this)">
         <div class="uz-icon">🔍</div><div class="uz-title">对比文件 D1</div><div class="uz-hint">最接近的对比文件</div>
         <div class="uz-file" id="file3name"></div>
         <div class="uz-file-hint" id="file3hint"></div>
-        <div class="uz-del" id="file3del" onclick="removeFile(event,3)" style="display:none">✕ 移除</div>
+        <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+          <div class="uz-del" id="file3del" onclick="removeFile(event,3)" style="display:none">✕ 移除</div>
+          <div class="uz-view" id="file3view" onclick="viewFileText(event,3)" style="display:none;cursor:pointer;font-size:11px;color:#1a4fa0;padding:2px 8px;border:1px solid #1a4fa0;border-radius:10px;background:#f0f4ff">📖 查看文本</div>
+        </div>
       </div>
       <div class="upload-zone" id="uz4" onclick="toggleExtraRefs()">
         <div class="uz-icon">📂</div><div class="uz-title">其他对比文件</div><div class="uz-hint">点击展开对比文件2~5</div>
@@ -128,28 +137,40 @@
           <div class="uz-icon">🔍</div><div class="uz-title">对比文件 2</div><div class="uz-hint">d2</div>
           <div class="uz-file" id="file5name"></div>
           <div class="uz-file-hint" id="file5hint"></div>
-          <div class="uz-del" id="file5del" onclick="removeFile(event,5)" style="display:none">✕ 移除</div>
+          <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+            <div class="uz-del" id="file5del" onclick="removeFile(event,5)" style="display:none">✕ 移除</div>
+            <div class="uz-view" id="file5view" onclick="viewFileText(event,5)" style="display:none;cursor:pointer;font-size:11px;color:#1a4fa0;padding:2px 8px;border:1px solid #1a4fa0;border-radius:10px;background:#f0f4ff">📖 查看文本</div>
+          </div>
         </div>
         <div class="upload-zone" id="uz6" onclick="triggerUpload(6)" ondragover="onDragOver(event,6)" ondragleave="onDragLeave(event,6)" ondrop="onDrop(event,6)">
           <input type="file" id="file6" accept=".pdf,.doc,.docx" onchange="uploadFile(6,this)">
           <div class="uz-icon">🔍</div><div class="uz-title">对比文件 3</div><div class="uz-hint">d3</div>
           <div class="uz-file" id="file6name"></div>
           <div class="uz-file-hint" id="file6hint"></div>
-          <div class="uz-del" id="file6del" onclick="removeFile(event,6)" style="display:none">✕ 移除</div>
+          <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+            <div class="uz-del" id="file6del" onclick="removeFile(event,6)" style="display:none">✕ 移除</div>
+            <div class="uz-view" id="file6view" onclick="viewFileText(event,6)" style="display:none;cursor:pointer;font-size:11px;color:#1a4fa0;padding:2px 8px;border:1px solid #1a4fa0;border-radius:10px;background:#f0f4ff">📖 查看文本</div>
+          </div>
         </div>
         <div class="upload-zone" id="uz7" onclick="triggerUpload(7)" ondragover="onDragOver(event,7)" ondragleave="onDragLeave(event,7)" ondrop="onDrop(event,7)">
           <input type="file" id="file7" accept=".pdf,.doc,.docx" onchange="uploadFile(7,this)">
           <div class="uz-icon">🔍</div><div class="uz-title">对比文件 4</div><div class="uz-hint">d4</div>
           <div class="uz-file" id="file7name"></div>
           <div class="uz-file-hint" id="file7hint"></div>
-          <div class="uz-del" id="file7del" onclick="removeFile(event,7)" style="display:none">✕ 移除</div>
+          <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+            <div class="uz-del" id="file7del" onclick="removeFile(event,7)" style="display:none">✕ 移除</div>
+            <div class="uz-view" id="file7view" onclick="viewFileText(event,7)" style="display:none;cursor:pointer;font-size:11px;color:#1a4fa0;padding:2px 8px;border:1px solid #1a4fa0;border-radius:10px;background:#f0f4ff">📖 查看文本</div>
+          </div>
         </div>
         <div class="upload-zone" id="uz8" onclick="triggerUpload(8)" ondragover="onDragOver(event,8)" ondragleave="onDragLeave(event,8)" ondrop="onDrop(event,8)">
           <input type="file" id="file8" accept=".pdf,.doc,.docx" onchange="uploadFile(8,this)">
           <div class="uz-icon">🔍</div><div class="uz-title">对比文件 5</div><div class="uz-hint">d5</div>
           <div class="uz-file" id="file8name"></div>
           <div class="uz-file-hint" id="file8hint"></div>
-          <div class="uz-del" id="file8del" onclick="removeFile(event,8)" style="display:none">✕ 移除</div>
+          <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+            <div class="uz-del" id="file8del" onclick="removeFile(event,8)" style="display:none">✕ 移除</div>
+            <div class="uz-view" id="file8view" onclick="viewFileText(event,8)" style="display:none;cursor:pointer;font-size:11px;color:#1a4fa0;padding:2px 8px;border:1px solid #1a4fa0;border-radius:10px;background:#f0f4ff">📖 查看文本</div>
+          </div>
         </div>
       </div>
     </div>
@@ -343,6 +364,21 @@
 </div>
 
 <!-- ===== 粘贴文本对话框 ===== -->
+<!-- ===== 文本查看模态框 ===== -->
+<div id="viewTextDialog" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeViewText()">
+  <div class="modal-card" style="max-width:780px;width:90vw;max-height:85vh;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="card-title" style="margin:0" id="viewTextTitle">文件解析文本</div>
+      <button onclick="closeViewText()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#666;padding:0 4px">✕</button>
+    </div>
+    <div style="font-size:11px;color:#888;margin-bottom:8px" id="viewTextMeta"></div>
+    <textarea id="viewTextContent" readonly style="flex:1;min-height:400px;padding:12px;border:1px solid #ddd;border-radius:6px;font-size:12px;font-family:'Courier New',monospace;resize:vertical;line-height:1.6;color:#333;background:#fafafa"></textarea>
+    <div class="btn-row" style="margin-top:12px;justify-content:flex-end">
+      <button class="btn" onclick="closeViewText()">关闭</button>
+    </div>
+  </div>
+</div>
+
 <div id="pasteTextDialog" class="modal-overlay" style="display:none" onclick="if(event.target===this)closePasteText()">
   <div class="modal-card" style="max-width:600px">
     <div class="card-title" style="margin-bottom:8px">手动输入文本 - <span id="pasteTextTitle"></span></div>
@@ -362,6 +398,8 @@ var CASE_ID = null;
 var state = {step:1, compRows:[], comp2Rows:[], effectRows:[], selectedStrategy:null};
 var DOC_TYPES = ['oa','patent','d1','','d2','d3','d4','d5'];
 var DOC_TYPE_NAMES = {oa:'审查意见通知书',patent:'申请文件',d1:'对比文件D1',d2:'对比文件2',d3:'对比文件3',d4:'对比文件4',d5:'对比文件5'};
+// 记录每个上传 slot 对应的 doc_id，用于「查看文本」
+var DOC_IDS = {1:null,2:null,3:null,5:null,6:null,7:null,8:null};
 
 // ===== API Helper =====
 async function api(method, path, body) {
@@ -532,6 +570,7 @@ async function createNewCase() {
 async function openCase(id) {
   CASE_ID = id;
   state = {step:1, compRows:[], comp2Rows:[], effectRows:[], selectedStrategy:null};
+  DOC_IDS = {1:null,2:null,3:null,5:null,6:null,7:null,8:null};
   document.getElementById('caseListPage').style.display = 'none';
   document.getElementById('caseWorkPage').style.display = '';
   try {
@@ -559,6 +598,10 @@ async function openCase(id) {
           }
           document.getElementById('file'+n+'hint').innerHTML = hintHtml;
           document.getElementById('file'+n+'del').style.display = 'block';
+          // 记录 doc_id，并显示「查看文本」按钮
+          DOC_IDS[n] = d.id;
+          var viewBtn = document.getElementById('file'+n+'view');
+          if (viewBtn) viewBtn.style.display = 'block';
         }
         // 回显模板文档
         if (d.doc_type === 'template') {
@@ -664,6 +707,12 @@ async function uploadFile(n, input) {
       document.getElementById('file'+n+'name').textContent = '✓ ' + f.name;
       document.getElementById('file'+n+'hint').textContent = data.message || '';
       document.getElementById('file'+n+'del').style.display = 'block';
+      // 记录 doc_id 并显示「查看文本」按钮
+      if (data.id) {
+        DOC_IDS[n] = data.id;
+        var viewBtn = document.getElementById('file'+n+'view');
+        if (viewBtn) viewBtn.style.display = 'block';
+      }
       // 如果后端自动提取了申请号/发明名称，刷新头部
       if (data.auto_filled && Object.keys(data.auto_filled).length > 0) {
         var caseResp2 = await api('GET', '/api/cases/'+CASE_ID);
@@ -714,11 +763,68 @@ async function removeFile(e, n) {
   document.getElementById('file'+n+'hint').textContent = '';
   document.getElementById('file'+n+'del').style.display = 'none';
   document.getElementById('file'+n).value = '';
+  // 清空 doc_id，隐藏「查看文本」按钮
+  DOC_IDS[n] = null;
+  var viewBtn = document.getElementById('file'+n+'view');
+  if (viewBtn) viewBtn.style.display = 'none';
+}
+
+// ===== 查看文件解析文本 =====
+async function viewFileText(e, n) {
+  e.stopPropagation();
+  var docId = DOC_IDS[n];
+  if (!docId) {
+    // 尝试从案件数据获取
+    if (CASE_ID) {
+      try {
+        var caseResp = await api('GET', '/api/cases/'+CASE_ID);
+        if (caseResp.ok) {
+          var caseData = await caseResp.json();
+          var docType = DOC_TYPES[n-1];
+          var doc = (caseData.documents||[]).find(function(d) { return d.doc_type === docType; });
+          if (doc) { DOC_IDS[n] = doc.id; docId = doc.id; }
+        }
+      } catch(ex) {}
+    }
+    if (!docId) { alert('未找到文件信息，请重新上传'); return; }
+  }
+
+  var dialog = document.getElementById('viewTextDialog');
+  var titleEl = document.getElementById('viewTextTitle');
+  var metaEl = document.getElementById('viewTextMeta');
+  var contentEl = document.getElementById('viewTextContent');
+
+  var docTypeNames = DOC_TYPE_NAMES;
+  var slotName = docTypeNames[DOC_TYPES[n-1]] || '文件 '+n;
+  titleEl.textContent = '📖 ' + slotName + ' — 解析文本';
+  metaEl.textContent = '加载中...';
+  contentEl.value = '';
+  dialog.style.display = 'flex';
+
+  try {
+    var resp = await api('GET', '/api/documents/'+docId);
+    if (resp.ok) {
+      var data = await resp.json();
+      var text = data.extracted_text || '';
+      contentEl.value = text || '（未解析到文本内容，可能是扫描件或解析失败）';
+      var len = text.length;
+      metaEl.textContent = '文件ID: ' + docId + ' | 文本长度: ' + len + ' 字符' + (len === 0 ? '  ⚠️ 无内容' : '');
+    } else {
+      contentEl.value = '获取失败，请重试';
+      metaEl.textContent = '';
+    }
+  } catch(ex) {
+    contentEl.value = '网络错误: ' + ex.message;
+    metaEl.textContent = '';
+  }
+}
+
+function closeViewText() {
+  document.getElementById('viewTextDialog').style.display = 'none';
 }
 
 // ===== AI Analysis =====
 async function runAIAnalyzeOA() {
-  var btn = document.getElementById('btnAnalyzeOA');
   btn.disabled = true; btn.textContent = 'AI 分析中...';
   try {
     var resp = await api('POST', '/api/cases/'+CASE_ID+'/analyze-oa', {});
