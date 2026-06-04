@@ -1,4 +1,12 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from database import get_db
+from models import Case, Document, ComparisonRow
+from services import ai_service as ai
+
+router = APIRouter()
+
 class AttackDefenseRequest(BaseModel):
     case_id: int
     round_num: int = 1
