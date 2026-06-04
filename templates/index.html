@@ -373,7 +373,8 @@
     </div>
     <div style="font-size:11px;color:#888;margin-bottom:8px" id="viewTextMeta"></div>
     <textarea id="viewTextContent" readonly style="flex:1;min-height:400px;padding:12px;border:1px solid #ddd;border-radius:6px;font-size:12px;font-family:'Courier New',monospace;resize:vertical;line-height:1.6;color:#333;background:#fafafa"></textarea>
-    <div class="btn-row" style="margin-top:12px;justify-content:flex-end">
+    <div class="btn-row" style="margin-top:12px;justify-content:space-between;align-items:center">
+      <button class="btn btn-primary" id="viewTextDownloadBtn" onclick="downloadOrigFile()" style="font-size:13px">⬇ 下载原文件</button>
       <button class="btn" onclick="closeViewText()">关闭</button>
     </div>
   </div>
@@ -400,6 +401,7 @@ var DOC_TYPES = ['oa','patent','d1','','d2','d3','d4','d5'];
 var DOC_TYPE_NAMES = {oa:'审查意见通知书',patent:'申请文件',d1:'对比文件D1',d2:'对比文件2',d3:'对比文件3',d4:'对比文件4',d5:'对比文件5'};
 // 记录每个上传 slot 对应的 doc_id，用于「查看文本」
 var DOC_IDS = {1:null,2:null,3:null,5:null,6:null,7:null,8:null};
+var _viewingDocId = null; // 当前弹窗正在查看的 doc_id，供下载按钮使用
 
 // ===== API Helper =====
 async function api(method, path, body) {
@@ -799,6 +801,7 @@ async function viewFileText(e, n) {
   titleEl.textContent = '📖 ' + slotName + ' — 解析文本';
   metaEl.textContent = '加载中...';
   contentEl.value = '';
+  _viewingDocId = docId;  // 记录供下载按钮使用
   dialog.style.display = 'flex';
 
   try {
@@ -821,6 +824,13 @@ async function viewFileText(e, n) {
 
 function closeViewText() {
   document.getElementById('viewTextDialog').style.display = 'none';
+  _viewingDocId = null;
+}
+
+function downloadOrigFile() {
+  if (!_viewingDocId) { alert('文件信息不存在'); return; }
+  // 直接跳转到下载 URL，浏览器会触发文件下载
+  window.open('/api/documents/' + _viewingDocId + '/file', '_blank');
 }
 
 // ===== AI Analysis =====
