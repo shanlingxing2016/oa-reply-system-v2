@@ -293,34 +293,6 @@
     </div>
   </div>
 
-  <!-- ===== 攻防迭代验证 ===== -->
-  <div class="card" style="border-left:3px solid #e74c3c" id="attackDefenseCard">
-    <div class="card-title">⚔ 攻防迭代验证
-      <span class="badge" style="background:#fff0f0;color:#e74c3c">AI 审查员攻击</span>
-    </div>
-    <div style="font-size:12px;color:#888;margin-bottom:12px">AI 以严格审查员视角攻击当前答复方案，找出可能被驳回的漏洞。建议在生成文档前先验证。</div>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-      <button class="btn btn-sm" id="btnAttackDefense" onclick="runAttackDefense()" style="background:#e74c3c;color:#fff">⚔ 开始攻防验证</button>
-      <span style="color:#aaa;font-size:12px" id="adStatusHint"></span>
-    </div>
-    <div id="adResultPanel" style="display:none">
-      <!-- 评分概览 -->
-      <div id="adScoreBar" style="display:flex;align-items:center;gap:16px;padding:12px 16px;background:#f9f9f9;border-radius:8px;margin-bottom:16px;flex-wrap:wrap">
-        <div style="font-size:28px;font-weight:700" id="adScoreNum">--</div>
-        <div>
-          <div style="font-size:14px;font-weight:600" id="adVerdict">--</div>
-          <div style="font-size:12px;color:#888" id="adSummary">--</div>
-        </div>
-      </div>
-      <!-- 漏洞列表 -->
-      <div style="font-size:13px;font-weight:600;color:#e74c3c;margin-bottom:8px">发现的漏洞</div>
-      <div id="adVulnList"></div>
-      <!-- 优点 -->
-      <div style="font-size:13px;font-weight:600;color:#27ae60;margin-top:12px;margin-bottom:8px">方案优点</div>
-      <div id="adStrengths"></div>
-    </div>
-  </div>
-
   <div class="card" style="border-left:3px solid #e67e22">
     <div class="card-title">参考模板 <span class="badge">可选，用于参照格式风格</span></div>
     <div class="upload-grid">
@@ -355,6 +327,39 @@
       <div style="margin-top:8px;display:flex;gap:8px">
         <button class="btn btn-sm btn-primary" onclick="submitRevision()">发送调整</button>
         <button class="btn btn-sm" onclick="cancelRevise()">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 攻防迭代验证 ===== -->
+  <div class="card" style="border-left:3px solid #e74c3c" id="attackDefenseCard">
+    <div class="card-title">⚔ 攻防迭代验证
+      <span class="badge" style="background:#fff0f0;color:#e74c3c" id="adRoundBadge">第 1 轮 / 最多 3 轮</span>
+    </div>
+    <div style="font-size:12px;color:#888;margin-bottom:12px">AI 以审查员视角攻击当前意见陈述书，找出漏洞。基于漏洞修改后可再次验证，最多 3 轮。</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn btn-sm" id="btnAttackDefense" onclick="runAttackDefense()" style="background:#e74c3c;color:#fff">⚔ 开始攻防验证</button>
+      <span style="color:#aaa;font-size:12px" id="adStatusHint"></span>
+    </div>
+    <div id="adResultPanel" style="display:none">
+      <div id="adScoreBar" style="display:flex;align-items:center;gap:16px;padding:12px 16px;background:#f9f9f9;border-radius:8px;margin-bottom:16px;flex-wrap:wrap">
+        <div style="font-size:28px;font-weight:700" id="adScoreNum">--</div>
+        <div>
+          <div style="font-size:14px;font-weight:600" id="adVerdict">--</div>
+          <div style="font-size:12px;color:#888" id="adSummary">--</div>
+        </div>
+      </div>
+      <div style="font-size:13px;font-weight:600;color:#e74c3c;margin-bottom:8px">发现的漏洞</div>
+      <div id="adVulnList"></div>
+      <div style="font-size:13px;font-weight:600;color:#27ae60;margin-top:12px;margin-bottom:8px">方案优点</div>
+      <div id="adStrengths"></div>
+      <div id="adActionButtons" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid #eee">
+        <div style="font-size:13px;font-weight:600;color:#333;margin-bottom:10px">下一步操作</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-sm" id="btnFixFromVuln" onclick="fixFromVulnerabilities()" style="background:#e67e22;color:#fff">🔄 基于漏洞修改意见陈述书</button>
+          <button class="btn btn-sm" id="btnNextRound" onclick="runAttackDefense()" style="background:#e74c3c;color:#fff;display:none">⚔ 下一轮攻防验证</button>
+          <button class="btn btn-sm" style="background:#27ae60;color:#fff" onclick="finishAttackDefense()">✓ 攻防通过，完成</button>
+        </div>
       </div>
     </div>
   </div>
@@ -424,7 +429,7 @@
 // ===== Global State =====
 var TOKEN = localStorage.getItem('oa_token') || '';
 var CASE_ID = null;
-var state = {step:1, compRows:[], comp2Rows:[], effectRows:[], selectedStrategy:null};
+var state = {step:1, compRows:[], comp2Rows:[], effectRows:[], selectedStrategy:null, adRound:0, adLastResult:null, adLastVulns:[]};
 var DOC_TYPES = ['oa','patent','d1','','d2','d3','d4','d5'];
 var DOC_TYPE_NAMES = {oa:'审查意见通知书',patent:'申请文件',d1:'对比文件D1',d2:'对比文件2',d3:'对比文件3',d4:'对比文件4',d5:'对比文件5'};
 // 记录每个上传 slot 对应的 doc_id，用于「查看文本」
@@ -952,29 +957,54 @@ function selectStrategy(code) {
 }
 
 // ===== 攻防迭代验证 =====
+var AD_MAX_ROUNDS = 3;
+
 async function runAttackDefense() {
+  if (state.adRound >= AD_MAX_ROUNDS) {
+    alert('已达到最大轮次 (' + AD_MAX_ROUNDS + ' 轮)，无法继续攻防。');
+    return;
+  }
+  // 需要先生成意见陈述书才能攻防
+  var preview = document.getElementById('docPreview');
+  if (!preview || preview.innerHTML.indexOf('点击「AI 生成意见陈述书') !== -1) {
+    alert('请先生成意见陈述书，然后再进行攻防验证。');
+    return;
+  }
+
   var btn = document.getElementById('btnAttackDefense');
   var hint = document.getElementById('adStatusHint');
   btn.disabled = true; btn.textContent = '⚔ 验证中...';
   hint.textContent = 'AI 审查员正在攻击当前方案...';
   try {
+    state.adRound++;
     var confirmedTechProblem = (document.getElementById('step5TechProblem') || {}).value || '';
     var diffFeatures = (state.comp2Rows || []).filter(function(r) { return r.feature && r.feature.trim(); });
+    // 获取当前意见陈述书内容
+    var currentDoc = preview.innerText || '';
     var resp = await api('POST', '/api/cases/'+CASE_ID+'/attack-defense-review', {
       strategy: state.selectedStrategy || 'S3',
       tech_problem: confirmedTechProblem,
-      diff_features: diffFeatures
+      diff_features: diffFeatures,
+      round_num: state.adRound,
+      max_rounds: AD_MAX_ROUNDS,
+      current_doc: currentDoc
     });
     if (resp.ok) {
       var data = await resp.json();
+      state.adLastResult = data;
       renderAttackDefenseResult(data);
-      hint.textContent = '验证完成（第' + (data.round||1) + '轮）';
+      hint.textContent = '验证完成（第 ' + state.adRound + '/' + AD_MAX_ROUNDS + ' 轮）';
+      document.getElementById('adRoundBadge').textContent = '第 ' + state.adRound + ' 轮 / 最多 ' + AD_MAX_ROUNDS + ' 轮';
     } else {
+      state.adRound--;
       var err = await resp.json();
       alert(err.detail || '攻防验证失败');
       hint.textContent = '验证失败';
     }
-  } catch(e) { alert('攻防验证失败: ' + e.message); hint.textContent = '网络错误'; }
+  } catch(e) {
+    state.adRound--;
+    alert('攻防验证失败: ' + e.message); hint.textContent = '网络错误';
+  }
   btn.disabled = false; btn.textContent = '⚔ 开始攻防验证';
 }
 
@@ -982,11 +1012,9 @@ function renderAttackDefenseResult(data) {
   var panel = document.getElementById('adResultPanel');
   panel.style.display = 'block';
 
-  // 评分
   var score = data.overall_score || 0;
   var scoreEl = document.getElementById('adScoreNum');
   scoreEl.textContent = score + '/100';
-  // 颜色
   if (score >= 80) { scoreEl.style.color = '#27ae60'; }
   else if (score >= 60) { scoreEl.style.color = '#e67e22'; }
   else { scoreEl.style.color = '#e74c3c'; }
@@ -1035,6 +1063,110 @@ function renderAttackDefenseResult(data) {
     strHtml = '<div style="font-size:12px;color:#aaa">（未列出优点）</div>';
   }
   document.getElementById('adStrengths').innerHTML = strHtml;
+
+  // 显示操作按钮区
+  var vulns = data.vulnerabilities || [];
+  var hasVulns = vulns.filter(function(v) { return v.severity === '高' || v.severity === '中'; }).length > 0;
+  document.getElementById('adActionButtons').style.display = hasVulns ? 'block' : 'none';
+  document.getElementById('btnFixFromVuln').style.display = hasVulns ? '' : 'none';
+  document.getElementById('btnNextRound').style.display = 'none';
+}
+
+// ===== 基于漏洞修改意见陈述书 =====
+async function fixFromVulnerabilities() {
+  var preview = document.getElementById('docPreview');
+  var currentDoc = preview.innerText || '';
+  state.adPrevDoc = currentDoc;
+
+  var btn = document.getElementById('btnFixFromVuln');
+  btn.disabled = true; btn.textContent = '🔄 正在基于漏洞修改...';
+  document.getElementById('adStatusHint').textContent = '正在基于漏洞修改意见陈述书...';
+
+  try {
+    // 构建漏洞修复指令
+    var vulns = state.adLastResult.vulnerabilities || [];
+    var fixInstructions = '以下是攻防验证第 ' + state.adRound + ' 轮发现的漏洞，请逐一修复：\n\n';
+    vulns.forEach(function(v, i) {
+      fixInstructions += (i+1) + '. [' + (v.severity||'') + '] ' + (v.category||'') + '：' + (v.issue||'') + '\n';
+      if (v.suggestion) fixInstructions += '   修复建议：' + v.suggestion + '\n';
+      if (v.examiner_would_say) fixInstructions += '   审查员可能说：' + v.examiner_would_say + '\n';
+      fixInstructions += '\n';
+    });
+
+    var resp = await api('POST', '/api/cases/'+CASE_ID+'/revise-doc', {
+      current_doc: currentDoc,
+      instructions: fixInstructions
+    });
+    if (resp.ok) {
+      var data = await resp.json();
+      var newDoc = data.doc_content || '';
+      // 更新意见陈述书预览
+      var html = newDoc.split('\n').map(function(l) {
+        var escaped = escHtml(l);
+        escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+        return '<div>' + escaped + '</div>';
+      }).join('');
+      preview.innerHTML = html || '<div>修改结果为空</div>';
+
+      // 显示修改对比
+      showRevisionDiff(state.adPrevDoc, newDoc);
+      // 启用下一轮攻防按钮
+      document.getElementById('btnNextRound').style.display = '';
+      document.getElementById('btnFixFromVuln').style.display = 'none';
+      document.getElementById('adStatusHint').textContent = '修改完成，请查看修改内容，确认后点击「下一轮攻防验证」';
+    } else {
+      var err = await resp.json();
+      alert(err.detail || '修改失败');
+    }
+  } catch(e) { alert('修改失败: ' + e.message); }
+  btn.disabled = false; btn.textContent = '🔄 基于漏洞修改意见陈述书';
+}
+
+// ===== 显示修改对比 =====
+function showRevisionDiff(oldText, newText) {
+  var oldLines = oldText.split('\n');
+  var newLines = newText.split('\n');
+  // 简单逐行对比
+  var diffHtml = '<div style="margin-top:12px;border:1px solid #ddd;border-radius:8px;overflow:hidden" id="adDiffPanel">';
+  diffHtml += '<div style="background:#f5f5f5;padding:8px 12px;font-size:13px;font-weight:600;border-bottom:1px solid #ddd">修改对比（第 ' + state.adRound + ' 轮）</div>';
+  diffHtml += '<div style="max-height:400px;overflow-y:auto;font-size:12px;font-family:monospace;line-height:1.8">';
+
+  // 简单 LCS diff
+  var maxLen = Math.max(oldLines.length, newLines.length);
+  var changes = 0;
+  for (var i = 0; i < maxLen && changes < 50; i++) {
+    var oldL = i < oldLines.length ? oldLines[i] : null;
+    var newL = i < newLines.length ? newLines[i] : null;
+    if (oldL && newL && oldL.trim() === newL.trim()) {
+      diffHtml += '<div style="padding:1px 12px;color:#666;border-left:3px solid #eee">' + escHtml(newL) + '</div>';
+    } else {
+      if (oldL) {
+        diffHtml += '<div style="padding:1px 12px;color:#c0392b;background:#fef5f5;border-left:3px solid #e74c3c;text-decoration:line-through">- ' + escHtml(oldL) + '</div>';
+      }
+      if (newL) {
+        diffHtml += '<div style="padding:1px 12px;color:#27ae60;background:#f0faf4;border-left:3px solid #27ae60">+ ' + escHtml(newL) + '</div>';
+      }
+      changes++;
+    }
+  }
+  if (newLines.length > maxLen || oldLines.length > maxLen) {
+    diffHtml += '<div style="padding:4px 12px;color:#999;text-align:center">... 仅显示部分差异</div>';
+  }
+  diffHtml += '</div></div>';
+
+  // 插入到操作按钮区之前
+  var actionDiv = document.getElementById('adActionButtons');
+  var existingDiff = document.getElementById('adDiffPanel');
+  if (existingDiff) existingDiff.remove();
+  actionDiv.insertAdjacentHTML('beforebegin', diffHtml);
+}
+
+// ===== 完成攻防 =====
+function finishAttackDefense() {
+  var panel = document.getElementById('adActionButtons');
+  panel.style.display = 'none';
+  document.getElementById('adStatusHint').textContent = '攻防验证通过，意见陈述书已定稿';
+  document.getElementById('adStatusHint').style.color = '#27ae60';
 }
 
 async function runAIGenerateDoc() {
