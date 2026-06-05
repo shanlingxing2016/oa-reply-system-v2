@@ -960,6 +960,10 @@ function selectStrategy(code) {
 var AD_MAX_ROUNDS = 3;
 
 async function runAttackDefense() {
+  // 保护 adRound 不被污染
+  if (typeof state.adRound !== 'number' || isNaN(state.adRound) || state.adRound < 0) {
+    state.adRound = 0;
+  }
   if (state.adRound >= AD_MAX_ROUNDS) {
     alert('已达到最大轮次 (' + AD_MAX_ROUNDS + ' 轮)，无法继续攻防。');
     return;
@@ -1125,13 +1129,33 @@ async function fixFromVulnerabilities() {
 // ===== 显示修改对比 =====
 function showRevisionDiff(oldText, newText, roundNum) {
   var round = roundNum || state.adRound || 1;
+  state.adLastNewText = newText; // 保存供复制使用
+
+  var actionDiv = document.getElementById('adActionButtons');
+  var existingDiff = document.getElementById('adDiffPanel');
+  if (existingDiff) existingDiff.remove();
+
+  // 如果没有变化
+  if (oldText === newText) {
+    var noChangeHtml = '<div style="margin-top:12px;border:1px solid #ddd;border-radius:8px;overflow:hidden" id="adDiffPanel">';
+    noChangeHtml += '<div style="background:#f5f5f5;padding:8px 12px;font-size:13px;font-weight:600;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center">';
+    noChangeHtml += '<span>修改对比（第 ' + round + ' 轮）</span>';
+    noChangeHtml += '<button class="btn btn-sm" onclick="copyRevisedText()" style="font-size:12px;padding:4px 10px">📋 复制修改后全文</button>';
+    noChangeHtml += '</div>';
+    noChangeHtml += '<div style="padding:16px;color:#888;text-align:center">本轮修改后内容没有变化</div></div>';
+    actionDiv.insertAdjacentHTML('beforebegin', noChangeHtml);
+    return;
+  }
+
   var oldLines = oldText.split('\n');
   var newLines = newText.split('\n');
   var diffHtml = '<div style="margin-top:12px;border:1px solid #ddd;border-radius:8px;overflow:hidden" id="adDiffPanel">';
-  diffHtml += '<div style="background:#f5f5f5;padding:8px 12px;font-size:13px;font-weight:600;border-bottom:1px solid #ddd">修改对比（第 ' + round + ' 轮）<span style="font-weight:400;font-size:12px;color:#888;margin-left:8px">上方意见陈述书已更新为最新版本，直接复制即可</span></div>';
+  diffHtml += '<div style="background:#f5f5f5;padding:8px 12px;font-size:13px;font-weight:600;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center">';
+  diffHtml += '<span>修改对比（第 ' + round + ' 轮）</span>';
+  diffHtml += '<button class="btn btn-sm" onclick="copyRevisedText()" style="font-size:12px;padding:4px 10px">📋 复制修改后全文</button>';
+  diffHtml += '</div>';
   diffHtml += '<div style="max-height:400px;overflow-y:auto;font-size:12px;font-family:monospace;line-height:1.8">';
 
-  // 简单 LCS diff
   var maxLen = Math.max(oldLines.length, newLines.length);
   var changes = 0;
   for (var i = 0; i < maxLen && changes < 50; i++) {
@@ -1154,11 +1178,35 @@ function showRevisionDiff(oldText, newText, roundNum) {
   }
   diffHtml += '</div></div>';
 
-  // 插入到操作按钮区之前
-  var actionDiv = document.getElementById('adActionButtons');
-  var existingDiff = document.getElementById('adDiffPanel');
-  if (existingDiff) existingDiff.remove();
   actionDiv.insertAdjacentHTML('beforebegin', diffHtml);
+}
+
+function copyRevisedText() {
+  var text = state.adLastNewText || '';
+  if (!text) { alert('没有可复制的修改内容'); return; }
+  function doCopy(t) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(function() {
+        alert('修改后的全文已复制到剪贴板');
+      }).catch(function() {
+        fallbackCopy(t);
+      });
+    } else {
+      fallbackCopy(t);
+    }
+  }
+  function fallbackCopy(t) {
+    var ta = document.createElement('textarea');
+    ta.value = t;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('修改后的全文已复制到剪贴板');
+  }
+  doCopy(text);
 }
 
 // ===== 完成攻防 =====
