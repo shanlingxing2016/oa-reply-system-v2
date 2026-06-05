@@ -1109,7 +1109,7 @@ async function fixFromVulnerabilities() {
       preview.innerHTML = html || '<div>修改结果为空</div>';
 
       // 显示修改对比
-      showRevisionDiff(state.adPrevDoc, newDoc);
+      showRevisionDiff(state.adPrevDoc, newDoc, state.adRound);
       // 启用下一轮攻防按钮
       document.getElementById('btnNextRound').style.display = '';
       document.getElementById('btnFixFromVuln').style.display = 'none';
@@ -1123,12 +1123,12 @@ async function fixFromVulnerabilities() {
 }
 
 // ===== 显示修改对比 =====
-function showRevisionDiff(oldText, newText) {
+function showRevisionDiff(oldText, newText, roundNum) {
+  var round = roundNum || state.adRound || 1;
   var oldLines = oldText.split('\n');
   var newLines = newText.split('\n');
-  // 简单逐行对比
   var diffHtml = '<div style="margin-top:12px;border:1px solid #ddd;border-radius:8px;overflow:hidden" id="adDiffPanel">';
-  diffHtml += '<div style="background:#f5f5f5;padding:8px 12px;font-size:13px;font-weight:600;border-bottom:1px solid #ddd">修改对比（第 ' + state.adRound + ' 轮）</div>';
+  diffHtml += '<div style="background:#f5f5f5;padding:8px 12px;font-size:13px;font-weight:600;border-bottom:1px solid #ddd">修改对比（第 ' + round + ' 轮）<span style="font-weight:400;font-size:12px;color:#888;margin-left:8px">上方意见陈述书已更新为最新版本，直接复制即可</span></div>';
   diffHtml += '<div style="max-height:400px;overflow-y:auto;font-size:12px;font-family:monospace;line-height:1.8">';
 
   // 简单 LCS diff
@@ -1141,7 +1141,7 @@ function showRevisionDiff(oldText, newText) {
       diffHtml += '<div style="padding:1px 12px;color:#666;border-left:3px solid #eee">' + escHtml(newL) + '</div>';
     } else {
       if (oldL) {
-        diffHtml += '<div style="padding:1px 12px;color:#c0392b;background:#fef5f5;border-left:3px solid #e74c3c;text-decoration:line-through">- ' + escHtml(oldL) + '</div>';
+        diffHtml += '<div style="padding:1px 12px;color:#c0392b;background:#fef5f5;border-left:3px solid #e74c3c;text-decoration:line-through;user-select:none;-webkit-user-select:none">- ' + escHtml(oldL) + '</div>';
       }
       if (newL) {
         diffHtml += '<div style="padding:1px 12px;color:#27ae60;background:#f0faf4;border-left:3px solid #27ae60">+ ' + escHtml(newL) + '</div>';
