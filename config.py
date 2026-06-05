@@ -17,6 +17,7 @@ LOGIN_PASSWORD = os.getenv("LOGIN_PASSWORD", "oa2025")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
+DEEPSEEK_OCR_MODEL = os.getenv("DEEPSEEK_OCR_MODEL", "deepseek-v4-flash")
 
 # 文件
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
