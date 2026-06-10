@@ -139,11 +139,11 @@ def upload_document(
     db.commit()
     db.refresh(doc)
 
-    # 仅对小文件做快速同步解析（<2MB）；大文件在 AI 分析时按需解析，避免 OCR 崩溃
+    # 仅对小文件做快速同步解析（<10MB）；大文件在 AI 分析时按需解析，避免 OCR 崩溃
     extracted = False
     auto_filled = {}
     try:
-        if len(content) < 2 * 1024 * 1024:
+        if len(content) < 10 * 1024 * 1024:
             result = pdf_parser.parse(str(stored_path))
             text = result.get("full_text", "")
             if text:
@@ -172,7 +172,7 @@ def upload_document(
     except Exception:
         pass
 
-    msg = "上传成功" + ("，已自动解析" if extracted else "（大文件将于AI分析时解析）")
+    msg = "上传成功" + ("，已自动解析" if extracted else "（超大文件将于AI分析时解析）")
 
     return {
         "id": doc.id,
