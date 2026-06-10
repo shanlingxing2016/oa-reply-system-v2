@@ -7,7 +7,17 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.0"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: oa-reply-db
+          property: connectionString
       - key: LOGIN_PASSWORD
         sync: false
       - key: DEEPSEEK_API_KEY
         sync: false
+
+databases:
+  - name: oa-reply-db
+    databaseName: oa_reply
+    user: oa_reply_user
+    plan: free
