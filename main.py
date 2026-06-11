@@ -8,9 +8,25 @@ from pathlib import Path
 import os
 
 from config import HOST, PORT
-from database import init_db, SessionLocal
+from database import init_db, SessionLocal, engine
 from models import Case, Document, Comparison, GeneratedDocument
 from routers import auth, cases, documents, comparisons, analysis
+
+
+def migrate_db():
+    """自动迁移：为已存在的表添加新列"""
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    # 为 cases 表添加 verified_chart_data 列（如果不存在）
+    try:
+        cols = [c["name"] for c in inspector.get_columns("cases")]
+        if "verified_chart_data" not in cols:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE cases ADD COLUMN verified_chart_data TEXT"))
+                conn.commit()
+                print("[migrate] cases.verified_chart_data 列已添加")
+    except Exception as e:
+        print(f"[migrate] 跳过: {e}")
 
 BASE_DIR = Path(__file__).parent
 
@@ -18,6 +34,7 @@ BASE_DIR = Path(__file__).parent
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    migrate_db()
     print(f"\n{'='*50}")
     print(f"  审查意见答复系统已启动")
     print(f"  HOST={HOST}  PORT={PORT}")

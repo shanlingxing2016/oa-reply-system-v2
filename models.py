@@ -17,6 +17,7 @@ class Case(Base):
     ai_summary = Column(Text)
     selected_strategy = Column(String(10))
     agent_notes = Column(Text)
+    verified_chart_data = Column(Text)  # JSON: 人工校对后的图表数据
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
