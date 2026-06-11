@@ -38,9 +38,6 @@ class PDFParser:
                 if block.strip():
                     pages.append({"page": i + 1, "content": block.strip()})
             total_pages = len(pages) or 1
-            # 补充：提取每页嵌入图片并 OCR（科研图表数据）
-            pages = self._append_page_image_ocr(file_path, pages)
-            full_text = "\n\n".join(p["content"] for p in pages)
             return {"total_pages": total_pages, "full_text": full_text, "pages": pages}
 
         # 第二优先：pypdf 文本提取
@@ -58,9 +55,6 @@ class PDFParser:
             pages = [{"page": 1, "content": full_text.strip()}] if full_text.strip() else []
             total_pages = len(reader.pages)
         else:
-            # 补充：对有文字的PDF也提取嵌入图片OCR
-            pages = self._append_page_image_ocr(file_path, pages)
-            full_text = "\n\n".join(p["content"] for p in pages)
             total_pages = len(reader.pages)
 
         return {"total_pages": total_pages, "full_text": full_text.strip(), "pages": pages}
