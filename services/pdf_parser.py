@@ -4,9 +4,11 @@ import base64
 import io
 import struct
 
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".gif"}
+
 
 class PDFParser:
-    """PDF 和 Word 文档解析，支持扫描件 OCR 回退"""
+    """PDF、Word 和图片文档解析，支持扫描件 OCR 回退及图表数据提取"""
 
     def __init__(self):
         pass
@@ -17,6 +19,8 @@ class PDFParser:
             return self.parse_pdf(file_path)
         elif ext in (".docx",):
             return self.parse_docx(file_path)
+        elif ext in IMAGE_EXTS:
+            return self.parse_image(file_path)
         else:
             raise ValueError(f"不支持的文件格式: {ext}")
 
@@ -34,6 +38,9 @@ class PDFParser:
                 if block.strip():
                     pages.append({"page": i + 1, "content": block.strip()})
             total_pages = len(pages) or 1
+            # 补充：提取每页嵌入图片并 OCR（科研图表数据）
+            pages = self._append_page_image_ocr(file_path, pages)
+            full_text = "\n\n".join(p["content"] for p in pages)
             return {"total_pages": total_pages, "full_text": full_text, "pages": pages}
 
         # 第二优先：pypdf 文本提取
@@ -51,9 +58,66 @@ class PDFParser:
             pages = [{"page": 1, "content": full_text.strip()}] if full_text.strip() else []
             total_pages = len(reader.pages)
         else:
+            # 补充：对有文字的PDF也提取嵌入图片OCR
+            pages = self._append_page_image_ocr(file_path, pages)
+            full_text = "\n\n".join(p["content"] for p in pages)
             total_pages = len(reader.pages)
 
         return {"total_pages": total_pages, "full_text": full_text.strip(), "pages": pages}
+
+    def _append_page_image_ocr(self, pdf_path: str, pages: list) -> list:
+        """遍历每页，提取嵌入图片并 OCR，将结果追加到对应页面内容中"""
+        try:
+            import fitz
+            from PIL import Image
+
+            doc = fitz.open(pdf_path)
+            try:
+                for page_info in pages:
+                    page_idx = page_info.get("page", 1) - 1
+                    if page_idx >= len(doc):
+                        continue
+                    page = doc[page_idx]
+                    img_list = page.get_images(full=True)
+                    if not img_list:
+                        continue
+
+                    page_images = []
+                    for img_index, img in enumerate(img_list, start=1):
+                        xref = img[0]
+                        try:
+                            base_image = doc.extract_image(xref)
+                            image_bytes = base_image["image"]
+                            pil_img = Image.open(io.BytesIO(image_bytes))
+                            if pil_img.mode != "RGB":
+                                pil_img = pil_img.convert("RGB")
+                            page_images.append(pil_img)
+                        except Exception:
+                            continue
+
+                    if not page_images:
+                        continue
+
+                    # 将所有图片拼接为一张，避免多次 API 调用
+                    if len(page_images) == 1:
+                        combined = page_images[0]
+                    else:
+                        max_w = max(im.size[0] for im in page_images)
+                        total_h = sum(im.size[1] for im in page_images)
+                        combined = Image.new("RGB", (max_w, total_h), "white")
+                        y = 0
+                        for im in page_images:
+                            combined.paste(im, (0, y))
+                            y += im.size[1]
+
+                    img_text = self._ocr_image_content(combined)
+                    if img_text and not img_text.startswith("["):
+                        page_info["content"] += f"\n\n[图片/图表识别]\n{img_text}"
+            finally:
+                doc.close()
+        except Exception:
+            pass
+        return pages
 
     def _fitz_extract_text(self, pdf_path: str) -> str:
         """用 PyMuPDF 提取 PDF 文本，自动识别表格结构并转为 Markdown 格式"""
@@ -310,68 +374,104 @@ class PDFParser:
         # 没有图片也没有文字的页面，返回空白
         return None
 
-    def _ocr_pdf(self, pdf_path: str) -> str:
-        """用 DeepSeek 多模态 API 对扫描件 PDF 做 OCR
-        关键优化：流式处理，每批提取→OCR→释放内存，避免 OOM"""
+    def parse_image(self, file_path: str) -> Dict:
+        """解析独立图片文件（JPG/PNG 等），支持 OCR 文字和图表数据提取"""
+        from PIL import Image
+        img = Image.open(file_path)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        text = self._ocr_image_content(img)
+        return {"total_pages": 1, "full_text": text, "pages": [{"page": 1, "content": text}]}
+
+    def _ocr_prompt(self) -> str:
+        return (
+            "请完整分析以下图片，并提取其中的所有信息：\n\n"
+            "1. 文字内容：完整提取所有可见文字，保持原始排版和段落结构。\n"
+            "2. 表格：如有表格，转换为 Markdown 表格格式（| 列1 | 列2 |，第二行用 |---|---| 分隔）。\n"
+            "3. 图表数据（如柱状图、折线图、饼图、散点图、热力图等）：\n"
+            "   - 提取图表标题\n"
+            "   - 提取X轴、Y轴标签及单位\n"
+            "   - 提取各数据系列的名称、颜色标识和对应数值\n"
+            "   - 将数据整理为 Markdown 表格输出\n"
+            "   - 如有图例，提取图例内容与对应数据系列\n"
+            "4. 不要遗漏任何信息。直接输出提取结果，不要添加任何说明或总结。"
+        )
+
+    def _ocr_image_content(self, img) -> str:
+        """对单张 PIL Image 调用 DeepSeek 多模态 API 进行 OCR，支持文字、表格和图表数据提取"""
         try:
             from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
             from openai import OpenAI
             from PIL import Image
-            from pypdf import PdfReader
 
             if not DEEPSEEK_API_KEY:
                 return ""
+
+            client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+
+            # 压缩：max 1200px（科研图表需要更高分辨率）, JPEG quality 40
+            w, h = img.size
+            if w > 1200:
+                ratio = 1200 / w
+                img = img.resize((1200, int(h * ratio)), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=40, optimize=True)
+            b64 = base64.b64encode(buf.getvalue()).decode()
+
+            content = [
+                {"type": "text", "text": self._ocr_prompt()},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+            ]
+
+            try:
+                resp = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[{"role": "user", "content": content}],
+                    temperature=0.1,
+                    max_tokens=8000,
+                    timeout=90,
+                )
+                return resp.choices[0].message.content or ""
+            except Exception as e:
+                return f"[API调用失败: {str(e)[:100]}]"
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return f"[OCR解析异常: {str(e)[:200]}]"
+
+    def _ocr_pdf(self, pdf_path: str) -> str:
+        """用 DeepSeek 多模态 API 对扫描件 PDF 做 OCR
+        关键优化：流式处理，每批提取→OCR→释放内存，避免 OOM"""
+        try:
+            from pypdf import PdfReader
 
             reader = PdfReader(pdf_path)
             total_pages = len(reader.pages)
             MAX_PAGES = min(total_pages, 30)  # 最多30页
 
-            client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
             all_text = []
 
             # 流式处理：每次只从 PDF 中提取 1 页，OCR后立即释放
             BATCH_SIZE = 1  # Render 512MB 下每批仅 1 页
             for batch_start in range(0, MAX_PAGES, BATCH_SIZE):
                 batch_end = min(batch_start + BATCH_SIZE, MAX_PAGES)
-                content = [{"type": "text", "text": "请完整提取以下文档图片中的所有文字内容，保持原始格式和段落结构。\n重要：如果图片中包含表格，请将表格转换为 Markdown 格式（使用 | 分隔列，第二行用 |---|---| 分隔表头和内容）输出，保持表格的行列结构不变。\n不要遗漏任何文字，包括页眉页脚。直接输出提取的文字，不要加任何说明。"}]
 
+                page_texts = []
                 for page_idx in range(batch_start, batch_end):
                     page = reader.pages[page_idx]
                     img = self._render_page_to_image(page, page_idx, pdf_path)
                     if img is None:
                         continue
-
-                    # 大幅压缩：max 800px, JPEG quality 35
-                    w, h = img.size
-                    if w > 800:
-                        ratio = 800 / w
-                        img = img.resize((800, int(h * ratio)), Image.Resampling.LANCZOS)
-                    buf = io.BytesIO()
-                    img.save(buf, format="JPEG", quality=35, optimize=True)
-                    b64 = base64.b64encode(buf.getvalue()).decode()
-                    content.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
-                    })
+                    page_texts.append(self._ocr_image_content(img))
 
                 # 如果这批没有任何图片（也没有文字），跳过
-                if len(content) <= 1:
+                if not page_texts:
                     all_text.append(f"--- 第{batch_start + 1}-{batch_end}页 ---\n\n（无可提取文字）")
                     continue
 
-                try:
-                    resp = client.chat.completions.create(
-                        model="deepseek-chat",
-                        messages=[{"role": "user", "content": content}],
-                        temperature=0.1,
-                        max_tokens=8000,
-                        timeout=90,
-                    )
-                    page_text = resp.choices[0].message.content or ""
-                except Exception as e:
-                    page_text = f"[API调用失败: {str(e)[:100]}]"
-
-                all_text.append(f"--- 第{batch_start + 1}-{batch_end}页 ---\n\n{page_text}")
+                combined = "\n\n".join(page_texts)
+                all_text.append(f"--- 第{batch_start + 1}-{batch_end}页 ---\n\n{combined}")
 
             return "\n\n".join(all_text)
 
