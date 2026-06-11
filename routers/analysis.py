@@ -25,6 +25,18 @@ class GenerateDocRequest(BaseModel):
     table2_features: Optional[list] = None  # 前端确认的区别特征列表（优先于DB）
 
 
+class ChartDataItem(BaseModel):
+    label: str          # 数据项名称，如 "DPPH自由基清除率"
+    unit: str           # 单位，如 "%"
+    value: str          # 数值，如 "92.35"
+    position: str       # 来源位置，如 "图1及实施例1"
+    note: Optional[str] = ""  # 备注
+
+
+class ChartDataRequest(BaseModel):
+    chart_data: list[ChartDataItem]  # 人工校对后的图表数据列表
+
+
 def _fuzzy_match_t1(feature_text: str, t1_map: dict):
     """【修复5】模糊匹配表二特征在表一中的对应行。
     用户可能编辑过表二中的特征文字，导致与表一原始特征不完全一致。
@@ -397,6 +409,19 @@ async def suggest_strategies(case_id: int, db: Session = Depends(get_db)):
                     pass
         doc_texts[d.doc_type] = text
 
+    # 如果存在人工校对后的图表数据，优先注入到 patent_text 中
+    patent_text = doc_texts.get("patent", "")
+    if case.verified_chart_data:
+        try:
+            vdata = json.loads(case.verified_chart_data)
+            if vdata:
+                chart_block = _format_verified_chart_data(vdata)
+                if chart_block and "[人工校对后的实验数据]" not in patent_text:
+                    patent_text = patent_text + "\n\n" + chart_block
+                    doc_texts["patent"] = patent_text
+        except Exception:
+            pass
+
     if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY == "your-deepseek-api-key-here":
         raise HTTPException(status_code=400, detail="未配置 DeepSeek API Key")
 
@@ -471,6 +496,19 @@ async def attack_defense_review(case_id: int, body: AttackDefenseRequest, db: Se
                 except Exception:
                     pass
         doc_texts[d.doc_type] = text
+
+    # 如果存在人工校对后的图表数据，优先注入到 patent_text 中
+    patent_text = doc_texts.get("patent", "")
+    if case.verified_chart_data:
+        try:
+            vdata = json.loads(case.verified_chart_data)
+            if vdata:
+                chart_block = _format_verified_chart_data(vdata)
+                if chart_block and "[人工校对后的实验数据]" not in patent_text:
+                    patent_text = patent_text + "\n\n" + chart_block
+                    doc_texts["patent"] = patent_text
+        except Exception:
+            pass
 
     # 驳回理由摘要
     oa_text = doc_texts.get("oa", "")
@@ -559,6 +597,19 @@ async def generate_doc(case_id: int, body: GenerateDocRequest, db: Session = Dep
                 except Exception:
                     pass
         doc_texts[d.doc_type] = text
+
+    # 如果存在人工校对后的图表数据，优先注入到 patent_text 中
+    patent_text = doc_texts.get("patent", "")
+    if case.verified_chart_data:
+        try:
+            vdata = json.loads(case.verified_chart_data)
+            if vdata:
+                chart_block = _format_verified_chart_data(vdata)
+                if chart_block and "[人工校对后的实验数据]" not in patent_text:
+                    patent_text = patent_text + "\n\n" + chart_block
+                    doc_texts["patent"] = patent_text
+        except Exception:
+            pass
 
     try:
         # 1. 构建固定模板（优先用前端确认的区别特征）
@@ -674,3 +725,121 @@ async def revise_doc(case_id: int, body: ReviseDocRequest, db: Session = Depends
         return {"id": gen.id, "doc_content": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文档调整失败: {str(e)}")
+
+
+# ========== 图表数据校对 API ==========
+
+@router.get("/chart-data")
+def get_chart_data(case_id: int, db: Session = Depends(get_db)):
+    """获取当前案件的图表数据（人工校对后的，或AI提取的原始数据）"""
+    case = db.query(Case).filter(Case.id == case_id).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="案件不存在")
+
+    # 优先返回人工校对后的数据
+    if case.verified_chart_data:
+        try:
+            return {"chart_data": json.loads(case.verified_chart_data), "verified": True}
+        except Exception:
+            pass
+
+    # 否则尝试从专利文档中提取图表数据
+    patent_doc = db.query(Document).filter(
+        Document.case_id == case_id, Document.doc_type == "patent"
+    ).first()
+    if patent_doc and patent_doc.extracted_text:
+        # 尝试从提取的文本中解析图表数据
+        chart_data = _extract_chart_data_from_text(patent_doc.extracted_text)
+        return {"chart_data": chart_data, "verified": False}
+
+    return {"chart_data": [], "verified": False}
+
+
+@router.put("/chart-data")
+def save_chart_data(case_id: int, body: ChartDataRequest, db: Session = Depends(get_db)):
+    """保存人工校对后的图表数据"""
+    case = db.query(Case).filter(Case.id == case_id).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="案件不存在")
+
+    case.verified_chart_data = json.dumps(
+        [item.model_dump() for item in body.chart_data],
+        ensure_ascii=False
+    )
+    db.commit()
+    return {"ok": True, "message": "图表数据已保存", "count": len(body.chart_data)}
+
+
+def _extract_chart_data_from_text(text: str) -> list:
+    """从OCR提取的文本中解析图表数据，生成初始的chart_data列表供人工校对"""
+    import re
+    chart_data = []
+    if not text:
+        return chart_data
+
+    # 1. 从【数据表格】Markdown表格中提取
+    table_pattern = r'\|([^|]+)\|([^|]+)\|'
+    lines = text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if line.startswith('|') and '---' not in line:
+            parts = [p.strip() for p in line.split('|') if p.strip()]
+            if len(parts) >= 2:
+                # 尝试判断是否是数据行（第二列是数值）
+                val_str = parts[1]
+                num_match = re.search(r'(\d+\.?\d*)\s*([%μumgU/]+)?', val_str)
+                if num_match:
+                    label = parts[0]
+                    value = num_match.group(1)
+                    unit = num_match.group(2) or ""
+                    chart_data.append({
+                        "label": label,
+                        "unit": unit,
+                        "value": value,
+                        "position": "",
+                        "note": "AI提取"
+                    })
+
+    # 2. 从文字描述中提取关键数值（如"DPPH清除率为92.35%"）
+    patterns = [
+        r'([\u4e00-\u9fa5A-Za-z\s]+?)(?:为|达到|约为|分别是|依次为)\s*(\d+\.?\d*)\s*([%μumgU/L]+)',
+        r'([\u4e00-\u9fa5A-Za-z\s]+?)(?:率|能力|活性|含量|浓度|值)\s*[:：]?\s*(\d+\.?\d*)\s*([%μumgU/L]+)',
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            label = match.group(1).strip()
+            value = match.group(2)
+            unit = match.group(3)
+            # 去重：如果已有相同label，跳过
+            if not any(d["label"] == label for d in chart_data):
+                chart_data.append({
+                    "label": label,
+                    "unit": unit,
+                    "value": value,
+                    "position": "",
+                    "note": "文字提取"
+                })
+
+    return chart_data
+
+
+def _format_verified_chart_data(chart_data: list) -> str:
+    """将人工校对后的图表数据格式化为文本块，注入到 patent_text 中供AI分析使用。
+    格式化的文本块会被AI严格遵循，确保后续分析中使用的是准确的人工校对数据。"""
+    if not chart_data:
+        return ""
+
+    lines = ["[人工校对后的实验数据]", "以下数据已经过人工核对，请严格依据这些数据进行分析：", ""]
+    lines.append("| 技术效果 | 数值 | 单位 | 来源位置 | 备注 |")
+    lines.append("|---|---|---|---|---|")
+    for item in chart_data:
+        label = item.get("label", "")
+        value = item.get("value", "")
+        unit = item.get("unit", "")
+        position = item.get("position", "")
+        note = item.get("note", "")
+        lines.append(f"| {label} | {value} | {unit} | {position} | {note} |")
+
+    lines.append("")
+    lines.append("【重要】在后续分析、比对和撰写审查意见时，必须以上述人工校对的实验数据为准，不得使用OCR提取的原始（可能不准确的）数据。")
+    return "\n".join(lines)
