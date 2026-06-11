@@ -396,45 +396,50 @@ class PDFParser:
 
     def _ocr_prompt(self) -> str:
         return (
-            "你是一位专业的科研数据提取专家。请仔细分析这张图片，按以下步骤操作：\n\n"
-            "=== 步骤1：识别图片类型 ===\n"
-            "先判断这是以下哪种类型：纯文字、表格、柱状图、折线图、饼图、散点图、流程图、\n"
-            "凝胶电泳图、显微镜照片、化学结构式、或其他类型。请直接写出类型名称。\n\n"
-            "=== 步骤2：提取所有可见文字 ===\n"
-            "完整提取图片中所有可见文字，包括：\n"
-            "- 标题（图题、表题）\n"
-            "- 坐标轴标签及单位（如 DPPH清除率(%)）\n"
-            "- 图例文字\n"
-            "- 数据标签（柱顶/点旁的数字）\n"
-            "- 任何注释文字\n"
-            "保持原始文字不变，不要翻译或改写。\n\n"
-            "=== 步骤3：精确提取图表数据（如果是图表） ===\n"
-            "这是最关键的一步，必须精确到每个数据点：\n"
-            "- 仔细阅读坐标轴刻度和单位\n"
-            "- 逐个读取每个数据点的具体数值\n"
-            "- 如果柱顶/点旁有数字标签，优先读取标签值\n"
-            "- 如果没有标签，根据Y轴刻度估算（精确到小数点后1位）\n"
-            "- 必须列出X轴上每一个类别的对应数值，不能遗漏\n"
-            "- 将结果整理为 Markdown 表格：第一列是X轴类别/系列名称，第二列是对应数值\n\n"
-            "=== 步骤4：输出格式要求 ===\n"
-            "【图片类型】xxx\n"
-            "【提取文字】...\n"
-            "【数据表格】\n"
-            "| 类别/系列 | 数值 |\n"
-            "|---|---|\n"
-            "| ... | ... |\n"
-            "\n"
-            "注意：\n"
-            "- 数值必须与图片中显示的一致，严禁编造\n"
-            "- 如果看不清楚某个值，写'无法辨认'，不要猜测\n"
-            "- 不要添加任何总结性文字，只输出上述结构化内容"
+            "你是一位专业的科研图表分析专家。这张图片是科研论文/专利中的附图。\n"
+            "请严格按照以下步骤分析，一步一步来，不要跳过任何步骤：\n\n"
+            "=== 步骤1：描述图表整体结构 ===\n"
+            "先告诉我这是什么类型的图表（柱状图/折线图/饼图/表格/电泳图/照片等），\n"
+            "然后描述：\n"
+            "- 图表标题是什么\n"
+            "- X轴代表什么，有哪些类别/标签\n"
+            "- Y轴代表什么，单位和刻度范围\n"
+            "- 有多少个数据系列/柱子/折线\n\n"
+            "=== 步骤2：逐个读取每个数据点（最重要的步骤） ===\n"
+            "请从左到右（或从上到下）逐个读取每个数据点的数值。\n"
+            "方法：\n"
+            "1. 先看Y轴刻度，确认每个刻度间隔代表多少\n"
+            "2. 对每一个柱子/数据点，仔细看它的高度/位置对应Y轴的哪个刻度\n"
+            "3. 如果柱顶或数据点旁边有数字标注，直接读取标注值\n"
+            "4. 如果没有标注，根据柱顶在Y轴上的投影位置估算数值\n"
+            "5. 估算时以Y轴刻度为基准，给出合理估计值（如25.0、26.5等）\n"
+            "6. 必须逐个列出所有数据点，不能遗漏任何一个\n\n"
+            "=== 步骤3：输出数据表格 ===\n"
+            "将步骤2的结果整理为Markdown表格：\n"
+            "| 序号 | X轴类别/名称 | 数值 | 备注（有无标注/估算） |\n"
+            "|---|---|---|---|\n"
+            "| 1 | ... | ... | ... |\n"
+            "...\n\n"
+            "=== 步骤4：补充文字信息 ===\n"
+            "提取图片中所有其他可见文字：\n"
+            "- 图注/说明文字\n"
+            "- 统计显著性标记（如 *、**、# 等）\n"
+            "- 任何注释或脚注\n\n"
+            "=== 重要规则 ===\n"
+            "- 你必须逐个数据点读取，不能概括或跳过\n"
+            "- 如果某个值确实看不清，写'约XX'或'无法辨认'\n"
+            "- 严禁编造数据，不确定就写'无法辨认'\n"
+            "- 不要输出任何总结、分析或建议，只输出上述结构化内容"
         )
 
     def _ocr_image_content(self, img) -> str:
-        """对单张 PIL Image 调用 DeepSeek 多模态 API 进行 OCR，支持文字、表格和图表数据提取。
-        优化：高分辨率 + 预处理 + 结构化提示词，提升科研图表识别准确性。"""
+        """对单张 PIL Image 调用多模态 API 进行 OCR，支持文字、表格和图表数据提取。
+        关键修复：使用配置中的OCR模型（deepseek-v4-pro 而非 deepseek-chat），大幅提升图表识别能力。"""
         try:
-            from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
+            from config import (
+                DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL,
+                DEEPSEEK_OCR_MODEL, DEEPSEEK_MODEL
+            )
             from openai import OpenAI
             from PIL import Image
 
@@ -443,16 +448,19 @@ class PDFParser:
 
             client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 
+            # 使用配置中的OCR模型（默认 deepseek-v4-pro，比 deepseek-chat 多模态能力强很多）
+            ocr_model = DEEPSEEK_OCR_MODEL or DEEPSEEK_MODEL or "deepseek-v4-pro"
+
             # 预处理：增强对比度、锐化
             img = self._preprocess_image(img)
 
-            # 压缩：max 1600px（科研图表需要高分辨率看清数值）, JPEG quality 85
+            # 压缩：max 1800px, JPEG quality 90（极限质量，确保数值可读）
             w, h = img.size
-            if w > 1600:
-                ratio = 1600 / w
-                img = img.resize((1600, int(h * ratio)), Image.Resampling.LANCZOS)
+            if w > 1800:
+                ratio = 1800 / w
+                img = img.resize((1800, int(h * ratio)), Image.Resampling.LANCZOS)
             buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=85, optimize=True)
+            img.save(buf, format="JPEG", quality=90, optimize=True)
             b64 = base64.b64encode(buf.getvalue()).decode()
 
             content = [
@@ -462,11 +470,11 @@ class PDFParser:
 
             try:
                 resp = client.chat.completions.create(
-                    model="deepseek-chat",
+                    model=ocr_model,
                     messages=[{"role": "user", "content": content}],
-                    temperature=0.05,  # 更低温度，减少幻觉
-                    max_tokens=12000,  # 增大输出空间
-                    timeout=120,       # 更长的超时
+                    temperature=0.0,   # 最低温度，最大限度减少幻觉
+                    max_tokens=12000,
+                    timeout=120,
                 )
                 raw = resp.choices[0].message.content or ""
                 return self._parse_ocr_response(raw)
@@ -479,43 +487,66 @@ class PDFParser:
             return f"[OCR解析异常: {str(e)[:200]}]"
 
     def _parse_ocr_response(self, raw: str) -> str:
-        """解析模型返回的结构化OCR结果，提取并清洗数据表格部分。"""
+        """解析模型返回的结构化OCR结果，清洗步骤标题，保留有用的数据和文字。"""
         lines = raw.strip().split("\n")
         result_parts = []
-        in_table = False
-        table_lines = []
-        other_lines = []
+        skip_patterns = (
+            "=== 步骤", "=== 重要规则 ===", "方法：", "1. 先", "2. 对", "3. 如果",
+            "4. 如果", "5. 估算", "6. 必须", "- 你必", "- 如果", "- 严禁", "- 不要",
+        )
 
         for line in lines:
             stripped = line.strip()
             if not stripped:
                 continue
-            # 识别表格行
-            if stripped.startswith("|") and "---" not in stripped.replace("-", ""):
-                in_table = True
-                table_lines.append(stripped)
-            elif stripped.startswith("|"):
-                in_table = True
-                table_lines.append(stripped)
-            elif in_table and not stripped.startswith("|"):
-                in_table = False
-                if table_lines:
-                    result_parts.append("\n".join(table_lines))
-                    table_lines = []
-                other_lines.append(stripped)
-            else:
-                if table_lines:
-                    result_parts.append("\n".join(table_lines))
-                    table_lines = []
-                other_lines.append(stripped)
+            # 跳过步骤说明和规则行
+            if any(stripped.startswith(p) for p in skip_patterns):
+                continue
+            result_parts.append(stripped)
 
-        if table_lines:
-            result_parts.append("\n".join(table_lines))
+        return "\n".join(result_parts).strip()
 
-        # 重新组装：先放其他信息，再放表格
-        filtered_other = [l for l in other_lines if l not in ("注意：", "=== 步骤1：识别图片类型 ===", "=== 步骤2：提取所有可见文字 ===", "=== 步骤3：精确提取图表数据（如果是图表） ===", "=== 步骤4：输出格式要求 ===")]
-        output = "\n\n".join(filtered_other + result_parts)
-        return output.strip()
+    @staticmethod
+    def extract_data_from_patent_text(patent_text: str) -> str:
+        """从专利文字中提取实验数据描述，作为图表OCR的补充/校验来源。\n
+        专利实施例通常会以文字形式描述图表数据（如\"PP-10菌株的DPPH清除率为25.2%\"），\n        这些文字描述往往比从图片OCR读取更准确。\n        """
+        import re
+        if not patent_text:
+            return ""
+
+        # 查找实施例中提到的图表数据模式
+        patterns = [
+            # 匹配 "XX为XX%"、"XX达到XX%" 等数据描述
+            r"[^。，；\n]{0,30}(?:为|达到|约为|分别是|依次为|分别达到了|高达)[^。，；\n]{0,50}(?:\d+\.?\d*)\s*%[^。，；\n]{0,30}",
+            # 匹配 "清除率|活性|含量|浓度|效率" 等关键词附近的数据
+            r"(?:清除率|活性|含量|浓度|效率|抑制率|存活率|增长率|OD值|吸光度)[^。，；\n]{0,40}(?:\d+\.?\d*)\s*%?[^。，；\n]{0,20}",
+            # 匹配 "图\d+显示|如图\d+所示" 附近的数据
+            r"(?:图\d+[显示表明]|如图\d+所示)[^。\n]{0,80}(?:\d+\.?\d*)\s*%?[^。\n]{0,40}",
+            # 匹配带单位的数值描述
+            r"[^。，；\n]{0,20}(?:\d+\.?\d*)\s*(?:%|mg/mL|U/mL|μg/mL|mmol/L|g/L|h|小时|天|min)[^。，；\n]{0,30}",
+        ]
+
+        findings = []
+        for pattern in patterns:
+            matches = re.findall(pattern, patent_text, re.IGNORECASE)
+            for m in matches:
+                m_clean = m.strip()
+                if m_clean and m_clean not in findings and len(m_clean) > 5:
+                    findings.append(m_clean)
+
+        if not findings:
+            return ""
+
+        # 去重并按在原文中出现顺序排序
+        seen = set()
+        ordered = []
+        for f in findings:
+            key = re.sub(r"\s+", "", f)
+            if key not in seen:
+                seen.add(key)
+                ordered.append(f)
+
+        return "[从专利文字中提取的实验数据参考]\n" + "\n".join(f"- {o}" for o in ordered[:30])
 
     def _ocr_pdf(self, pdf_path: str) -> str:
         """用 DeepSeek 多模态 API 对扫描件 PDF 做 OCR
