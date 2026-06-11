@@ -377,22 +377,62 @@ class PDFParser:
         text = self._ocr_image_content(img)
         return {"total_pages": 1, "full_text": text, "pages": [{"page": 1, "content": text}]}
 
+    def _preprocess_image(self, img) -> 'Image.Image':
+        """图片预处理：增强对比度、锐化，提升OCR准确性"""
+        from PIL import ImageEnhance, ImageFilter
+
+        # 1. 自动对比度增强
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(1.3)
+
+        # 2. 锐化（增强文字/线条边缘）
+        img = img.filter(ImageFilter.SHARPEN)
+
+        # 3. 亮度微调
+        enhancer = ImageEnhance.Brightness(img)
+        img = enhancer.enhance(1.05)
+
+        return img
+
     def _ocr_prompt(self) -> str:
         return (
-            "请完整分析以下图片，并提取其中的所有信息：\n\n"
-            "1. 文字内容：完整提取所有可见文字，保持原始排版和段落结构。\n"
-            "2. 表格：如有表格，转换为 Markdown 表格格式（| 列1 | 列2 |，第二行用 |---|---| 分隔）。\n"
-            "3. 图表数据（如柱状图、折线图、饼图、散点图、热力图等）：\n"
-            "   - 提取图表标题\n"
-            "   - 提取X轴、Y轴标签及单位\n"
-            "   - 提取各数据系列的名称、颜色标识和对应数值\n"
-            "   - 将数据整理为 Markdown 表格输出\n"
-            "   - 如有图例，提取图例内容与对应数据系列\n"
-            "4. 不要遗漏任何信息。直接输出提取结果，不要添加任何说明或总结。"
+            "你是一位专业的科研数据提取专家。请仔细分析这张图片，按以下步骤操作：\n\n"
+            "=== 步骤1：识别图片类型 ===\n"
+            "先判断这是以下哪种类型：纯文字、表格、柱状图、折线图、饼图、散点图、流程图、\n"
+            "凝胶电泳图、显微镜照片、化学结构式、或其他类型。请直接写出类型名称。\n\n"
+            "=== 步骤2：提取所有可见文字 ===\n"
+            "完整提取图片中所有可见文字，包括：\n"
+            "- 标题（图题、表题）\n"
+            "- 坐标轴标签及单位（如 DPPH清除率(%)）\n"
+            "- 图例文字\n"
+            "- 数据标签（柱顶/点旁的数字）\n"
+            "- 任何注释文字\n"
+            "保持原始文字不变，不要翻译或改写。\n\n"
+            "=== 步骤3：精确提取图表数据（如果是图表） ===\n"
+            "这是最关键的一步，必须精确到每个数据点：\n"
+            "- 仔细阅读坐标轴刻度和单位\n"
+            "- 逐个读取每个数据点的具体数值\n"
+            "- 如果柱顶/点旁有数字标签，优先读取标签值\n"
+            "- 如果没有标签，根据Y轴刻度估算（精确到小数点后1位）\n"
+            "- 必须列出X轴上每一个类别的对应数值，不能遗漏\n"
+            "- 将结果整理为 Markdown 表格：第一列是X轴类别/系列名称，第二列是对应数值\n\n"
+            "=== 步骤4：输出格式要求 ===\n"
+            "【图片类型】xxx\n"
+            "【提取文字】...\n"
+            "【数据表格】\n"
+            "| 类别/系列 | 数值 |\n"
+            "|---|---|\n"
+            "| ... | ... |\n"
+            "\n"
+            "注意：\n"
+            "- 数值必须与图片中显示的一致，严禁编造\n"
+            "- 如果看不清楚某个值，写'无法辨认'，不要猜测\n"
+            "- 不要添加任何总结性文字，只输出上述结构化内容"
         )
 
     def _ocr_image_content(self, img) -> str:
-        """对单张 PIL Image 调用 DeepSeek 多模态 API 进行 OCR，支持文字、表格和图表数据提取"""
+        """对单张 PIL Image 调用 DeepSeek 多模态 API 进行 OCR，支持文字、表格和图表数据提取。
+        优化：高分辨率 + 预处理 + 结构化提示词，提升科研图表识别准确性。"""
         try:
             from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
             from openai import OpenAI
@@ -403,13 +443,16 @@ class PDFParser:
 
             client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 
-            # 压缩：max 1200px（科研图表需要更高分辨率）, JPEG quality 40
+            # 预处理：增强对比度、锐化
+            img = self._preprocess_image(img)
+
+            # 压缩：max 1600px（科研图表需要高分辨率看清数值）, JPEG quality 85
             w, h = img.size
-            if w > 1200:
-                ratio = 1200 / w
-                img = img.resize((1200, int(h * ratio)), Image.Resampling.LANCZOS)
+            if w > 1600:
+                ratio = 1600 / w
+                img = img.resize((1600, int(h * ratio)), Image.Resampling.LANCZOS)
             buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=40, optimize=True)
+            img.save(buf, format="JPEG", quality=85, optimize=True)
             b64 = base64.b64encode(buf.getvalue()).decode()
 
             content = [
@@ -421,11 +464,12 @@ class PDFParser:
                 resp = client.chat.completions.create(
                     model="deepseek-chat",
                     messages=[{"role": "user", "content": content}],
-                    temperature=0.1,
-                    max_tokens=8000,
-                    timeout=90,
+                    temperature=0.05,  # 更低温度，减少幻觉
+                    max_tokens=12000,  # 增大输出空间
+                    timeout=120,       # 更长的超时
                 )
-                return resp.choices[0].message.content or ""
+                raw = resp.choices[0].message.content or ""
+                return self._parse_ocr_response(raw)
             except Exception as e:
                 return f"[API调用失败: {str(e)[:100]}]"
 
@@ -433,6 +477,45 @@ class PDFParser:
             import traceback
             traceback.print_exc()
             return f"[OCR解析异常: {str(e)[:200]}]"
+
+    def _parse_ocr_response(self, raw: str) -> str:
+        """解析模型返回的结构化OCR结果，提取并清洗数据表格部分。"""
+        lines = raw.strip().split("\n")
+        result_parts = []
+        in_table = False
+        table_lines = []
+        other_lines = []
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # 识别表格行
+            if stripped.startswith("|") and "---" not in stripped.replace("-", ""):
+                in_table = True
+                table_lines.append(stripped)
+            elif stripped.startswith("|"):
+                in_table = True
+                table_lines.append(stripped)
+            elif in_table and not stripped.startswith("|"):
+                in_table = False
+                if table_lines:
+                    result_parts.append("\n".join(table_lines))
+                    table_lines = []
+                other_lines.append(stripped)
+            else:
+                if table_lines:
+                    result_parts.append("\n".join(table_lines))
+                    table_lines = []
+                other_lines.append(stripped)
+
+        if table_lines:
+            result_parts.append("\n".join(table_lines))
+
+        # 重新组装：先放其他信息，再放表格
+        filtered_other = [l for l in other_lines if l not in ("注意：", "=== 步骤1：识别图片类型 ===", "=== 步骤2：提取所有可见文字 ===", "=== 步骤3：精确提取图表数据（如果是图表） ===", "=== 步骤4：输出格式要求 ===")]
+        output = "\n\n".join(filtered_other + result_parts)
+        return output.strip()
 
     def _ocr_pdf(self, pdf_path: str) -> str:
         """用 DeepSeek 多模态 API 对扫描件 PDF 做 OCR
@@ -517,7 +600,8 @@ class PDFParser:
         return None
 
     def _fitz_render_page(self, pdf_path: str, page_num: int) -> 'Image.Image | None':
-        """用 PyMuPDF 渲染单页（按需打开文件，用完立即关闭）"""
+        """用 PyMuPDF 渲染单页（按需打开文件，用完立即关闭）
+        使用 200 DPI 渲染，确保图表中的细小文字和数值清晰可读。"""
         import fitz
         from PIL import Image
 
@@ -526,13 +610,69 @@ class PDFParser:
             if page_num >= len(doc):
                 return None
             page = doc[page_num]
-            # 渲染为 150 DPI 的 pixmap（足够 OCR，不过大）
-            mat = fitz.Matrix(150 / 72, 150 / 72)
+            # 渲染为 200 DPI（高于普通OCR的150 DPI，确保图表数值清晰）
+            mat = fitz.Matrix(200 / 72, 200 / 72)
             pix = page.get_pixmap(matrix=mat, colorspace="rgb")
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             return img
         finally:
             doc.close()
+
+    def extract_pdf_images_text(self, pdf_path: str, max_images: int = 2) -> str:
+        """安全提取PDF中嵌入图片的文字/图表数据（AI分析阶段调用）。
+        限制：只取面积最大的前 max_images 张图片进行OCR，防止超时崩溃。
+        过滤掉过小的图片（图标、装饰线等）。"""
+        try:
+            import fitz
+            from PIL import Image
+        except Exception:
+            return ""
+
+        # 第1步：扫描所有页，收集所有候选图片及其元信息
+        candidates = []  # [(area, page_idx, pil_img), ...]
+        try:
+            doc = fitz.open(pdf_path)
+            try:
+                for page_idx in range(len(doc)):
+                    page = doc[page_idx]
+                    img_list = page.get_images(full=True)
+                    if not img_list:
+                        continue
+                    for img in img_list:
+                        xref = img[0]
+                        try:
+                            base_image = doc.extract_image(xref)
+                            pil_img = Image.open(io.BytesIO(base_image["image"]))
+                            area = pil_img.size[0] * pil_img.size[1]
+                            # 过滤过小图片（图标、装饰线）
+                            if area >= 80000:  # 约 280x280
+                                candidates.append((area, page_idx, pil_img))
+                        except Exception:
+                            continue
+            finally:
+                doc.close()
+        except Exception:
+            return ""
+
+        if not candidates:
+            return ""
+
+        # 按面积降序，只取前 max_images 张
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        selected = candidates[:max_images]
+
+        results = []
+        for area, page_idx, pil_img in selected:
+            if pil_img.mode != "RGB":
+                pil_img = pil_img.convert("RGB")
+            try:
+                img_text = self._ocr_image_content(pil_img)
+                if img_text and not img_text.startswith("["):
+                    results.append(f"--- 第{page_idx + 1}页图片/图表 ---\n{img_text}")
+            except Exception:
+                continue
+
+        return "\n\n".join(results) if results else ""
 
     def parse_docx(self, file_path: str) -> Dict:
         import docx2txt
