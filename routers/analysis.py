@@ -359,14 +359,14 @@ async def suggest_strategies(case_id: int, db: Session = Depends(get_db)):
     if not case:
         raise HTTPException(status_code=404, detail="案件不存在")
 
-    # 收集所有文档文本（大文件按需解析）
+    # 收集所有文档文本（大文件按需解析，patent PDF 额外提取图表数据）
     docs = db.query(Document).filter(Document.case_id == case_id).all()
     doc_texts = {}
+    pdf_parser = PDFParser()
     for d in docs:
         text = d.extracted_text or ""
         if not text and d.stored_path:
             try:
-                pdf_parser = PDFParser()
                 result = pdf_parser.parse(d.stored_path)
                 text = result.get("full_text", "")
                 if text:
@@ -374,6 +374,27 @@ async def suggest_strategies(case_id: int, db: Session = Depends(get_db)):
                     db.commit()
             except Exception:
                 pass
+        # patent PDF 额外提取嵌入图片的图表数据（仅第一次，防止重复）
+        if d.doc_type == "patent" and d.stored_path and d.stored_path.lower().endswith(".pdf"):
+            if "[以下是从专利附图/实验图表中提取的数据]" not in (d.extracted_text or ""):
+                try:
+                    img_text = pdf_parser.extract_pdf_images_text(d.stored_path, max_images=2)
+                    if img_text:
+                        text = text + "\n\n[以下是从专利附图/实验图表中提取的数据]\n" + img_text
+                        d.extracted_text = text
+                        db.commit()
+                except Exception:
+                    pass
+            # 同时从专利文字中提取实验数据（作为OCR数据的补充/校验）
+            if "[从专利文字中提取的实验数据]" not in (d.extracted_text or ""):
+                try:
+                    text_data = PDFParser.extract_data_from_patent_text(text)
+                    if text_data:
+                        text = text + "\n\n" + text_data
+                        d.extracted_text = text
+                        db.commit()
+                except Exception:
+                    pass
         doc_texts[d.doc_type] = text
 
     if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY == "your-deepseek-api-key-here":
@@ -413,11 +434,42 @@ async def attack_defense_review(case_id: int, body: AttackDefenseRequest, db: Se
     if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY == "your-deepseek-api-key-here":
         raise HTTPException(status_code=400, detail="未配置 DeepSeek API Key")
 
-    # 收集案件数据
+    # 收集案件数据（大文件按需解析，patent PDF 额外提取图表数据）
     docs = db.query(Document).filter(Document.case_id == case_id).all()
     doc_texts = {}
+    pdf_parser = PDFParser()
     for d in docs:
         text = d.extracted_text or ""
+        if not text and d.stored_path:
+            try:
+                result = pdf_parser.parse(d.stored_path)
+                text = result.get("full_text", "")
+                if text:
+                    d.extracted_text = text
+                    db.commit()
+            except Exception:
+                pass
+        # patent PDF 额外提取嵌入图片的图表数据（仅第一次，防止重复）
+        if d.doc_type == "patent" and d.stored_path and d.stored_path.lower().endswith(".pdf"):
+            if "[以下是从专利附图/实验图表中提取的数据]" not in (d.extracted_text or ""):
+                try:
+                    img_text = pdf_parser.extract_pdf_images_text(d.stored_path, max_images=2)
+                    if img_text:
+                        text = text + "\n\n[以下是从专利附图/实验图表中提取的数据]\n" + img_text
+                        d.extracted_text = text
+                        db.commit()
+                except Exception:
+                    pass
+            # 同时从专利文字中提取实验数据（作为OCR数据的补充/校验）
+            if "[从专利文字中提取的实验数据]" not in (d.extracted_text or ""):
+                try:
+                    text_data = PDFParser.extract_data_from_patent_text(text)
+                    if text_data:
+                        text = text + "\n\n" + text_data
+                        d.extracted_text = text
+                        db.commit()
+                except Exception:
+                    pass
         doc_texts[d.doc_type] = text
 
     # 驳回理由摘要
@@ -473,11 +525,11 @@ async def generate_doc(case_id: int, body: GenerateDocRequest, db: Session = Dep
 
     docs = db.query(Document).filter(Document.case_id == case_id).all()
     doc_texts = {}
+    pdf_parser = PDFParser()
     for d in docs:
         text = d.extracted_text or ""
         if not text and d.stored_path:
             try:
-                pdf_parser = PDFParser()
                 result = pdf_parser.parse(d.stored_path)
                 text = result.get("full_text", "")
                 if text:
@@ -485,6 +537,27 @@ async def generate_doc(case_id: int, body: GenerateDocRequest, db: Session = Dep
                     db.commit()
             except Exception:
                 pass
+        # patent PDF 额外提取嵌入图片的图表数据（仅第一次，防止重复）
+        if d.doc_type == "patent" and d.stored_path and d.stored_path.lower().endswith(".pdf"):
+            if "[以下是从专利附图/实验图表中提取的数据]" not in (d.extracted_text or ""):
+                try:
+                    img_text = pdf_parser.extract_pdf_images_text(d.stored_path, max_images=2)
+                    if img_text:
+                        text = text + "\n\n[以下是从专利附图/实验图表中提取的数据]\n" + img_text
+                        d.extracted_text = text
+                        db.commit()
+                except Exception:
+                    pass
+            # 同时从专利文字中提取实验数据（作为OCR数据的补充/校验）
+            if "[从专利文字中提取的实验数据]" not in (d.extracted_text or ""):
+                try:
+                    text_data = PDFParser.extract_data_from_patent_text(text)
+                    if text_data:
+                        text = text + "\n\n" + text_data
+                        d.extracted_text = text
+                        db.commit()
+                except Exception:
+                    pass
         doc_texts[d.doc_type] = text
 
     try:
