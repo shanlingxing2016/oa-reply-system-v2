@@ -238,6 +238,7 @@
     </tr></thead><tbody id="effectTableBody"></tbody></table></div>
     <div class="add-row-btn" onclick="addEffectRow()">+ 添加行</div>
     <div class="add-row-btn" onclick="aiAnalyzeEffects()" id="btnAiAnalyzeEffects" style="border-top:none;color:#1a4fa0">🤖 AI 数值化效果分析</div>
+    <div class="add-row-btn" onclick="extractChartDataToEffects()" style="border-top:none;color:#27ae60">📊 从专利文本提取实验数据</div>
   </div>
   <div style="margin-top:24px;padding-top:16px;border-top:2px solid #e0e4e8" class="btn-row sticky" id="step3Toolbar">
     <button class="btn btn-ai" id="btnAiAnalyze" onclick="aiAnalyze()">🤖 AI 智能分析</button>
@@ -429,7 +430,7 @@
 // ===== Global State =====
 var TOKEN = localStorage.getItem('oa_token') || '';
 var CASE_ID = null;
-var state = {step:1, compRows:[], comp2Rows:[], effectRows:[], selectedStrategy:null, adRound:0, adLastResult:null, adLastVulns:[]};
+var state = {step:1, compRows:[], comp2Rows:[], effectRows:[], chartData:[], chartDataVerified:false, selectedStrategy:null, adRound:0, adLastResult:null, adLastVulns:[]};
 var DOC_TYPES = ['oa','patent','d1','','d2','d3','d4','d5'];
 var DOC_TYPE_NAMES = {oa:'审查意见通知书',patent:'申请文件',d1:'对比文件D1',d2:'对比文件2',d3:'对比文件3',d4:'对比文件4',d5:'对比文件5'};
 // 记录每个上传 slot 对应的 doc_id，用于「查看文本」
@@ -604,7 +605,7 @@ async function createNewCase() {
 // ===== Open Case =====
 async function openCase(id) {
   CASE_ID = id;
-  state = {step:1, compRows:[], comp2Rows:[], effectRows:[], selectedStrategy:null};
+  state = {step:1, compRows:[], comp2Rows:[], effectRows:[], chartData:[], chartDataVerified:false, selectedStrategy:null};
   DOC_IDS = {1:null,2:null,3:null,5:null,6:null,7:null,8:null};
   document.getElementById('caseListPage').style.display = 'none';
   document.getElementById('caseWorkPage').style.display = '';
@@ -672,6 +673,8 @@ async function openCase(id) {
     if (data.rejection_reasons) {
       renderRejectionReasons(JSON.parse(data.rejection_reasons));
     }
+    // Load chart data (patent experimental data for verification)
+    loadChartData();
     // Go to saved step
     goStep(data.current_step || 1);
   } catch(e) { alert('加载案件失败: ' + e.message); }
@@ -1463,10 +1466,10 @@ function renderEffectTable() {
     tbody.innerHTML += '<tr class="'+rc+'">' +
       '<td><textarea class="cell-edit" oninput="syncRowHeight(this)" onmouseup="syncRowHeight(this)" onchange="state.effectRows['+i+'].feature=this.value">'+esc(row.feature||'')+'</textarea></td>' +
       '<td><textarea class="cell-edit" oninput="syncRowHeight(this)" onmouseup="syncRowHeight(this)" onchange="state.effectRows['+i+'].app_position=this.value" style="min-height:36px">'+esc(row.app_position||'')+'</textarea></td>' +
-      '<td><input class="cell-input" value="'+esc(row.app_value||'')+'" onchange="state.effectRows['+i+'].app_value=this.value" placeholder="如IC50=5.2nM" style="font-size:12px;padding:3px 5px;border:1px solid #ddd;border-radius:4px;width:100%;font-family:inherit"></td>' +
+      '<td><textarea class="cell-edit" oninput="syncRowHeight(this)" onmouseup="syncRowHeight(this)" onchange="state.effectRows['+i+'].app_value=this.value" style="min-height:36px">'+esc(row.app_value||'')+'</textarea></td>' +
       '<td><select onchange="state.effectRows['+i+'].ref_document=this.value" style="font-size:11px;padding:3px 5px;border:1px solid #ddd;border-radius:4px"><option'+(row.ref_document==='D1'?' selected':'')+'>D1</option><option'+(row.ref_document==='D2'?' selected':'')+'>D2</option></select></td>' +
       '<td><textarea class="cell-edit" oninput="syncRowHeight(this)" onmouseup="syncRowHeight(this)" onchange="state.effectRows['+i+'].ref_position=this.value" style="min-height:36px">'+esc(row.ref_position||'')+'</textarea></td>' +
-      '<td><input class="cell-input" value="'+esc(row.ref_value||'')+'" onchange="state.effectRows['+i+'].ref_value=this.value" placeholder="如IC50=100nM" style="font-size:12px;padding:3px 5px;border:1px solid #ddd;border-radius:4px;width:100%;font-family:inherit"></td>' +
+      '<td><textarea class="cell-edit" oninput="syncRowHeight(this)" onmouseup="syncRowHeight(this)" onchange="state.effectRows['+i+'].ref_value=this.value" style="min-height:36px">'+esc(row.ref_value||'')+'</textarea></td>' +
       '<td><textarea class="cell-edit" oninput="syncRowHeight(this)" onmouseup="syncRowHeight(this)" onchange="state.effectRows['+i+'].ref_content=this.value">'+esc(row.ref_content||'')+'</textarea></td>' +
       '<td><select class="pub-sel" onchange="state.effectRows['+i+'].pub_status=this.value;renderEffectTable()">' +
         '<option value="yes"'+(row.pub_status==='yes'?' selected':'')+'>已公开</option>' +
@@ -1479,6 +1482,97 @@ function renderEffectTable() {
 function addCompRow() { state.compRows.push({claim:'',feature:'',ref_position:'',ref_content:'',pub_status:'no',analysis:''}); renderCompTable(); }
 function addComp2Row() { state.comp2Rows.push({diff_no:'',feature:'',ref_document:'D2',ref_position:'',ref_content:'',pub_status:'no',analysis:''}); renderComp2Table(); }
 function addEffectRow() { state.effectRows.push({feature:'',app_position:'',app_value:'',ref_document:'D1',ref_position:'',ref_value:'',ref_content:'',pub_status:'no',analysis:''}); renderEffectTable(); }
+
+// ===== 图表数据校对 =====
+function renderChartDataTable() {
+  var tbody = document.getElementById('chartDataTableBody');
+  if (!tbody) return; // 图表校对卡片已移除，安全退出
+  tbody.innerHTML = '';
+  state.chartData.forEach(function(row, i) {
+    tbody.innerHTML += '<tr>' +
+      '<td><input class="cell-input" value="'+esc(row.label||'')+'" onchange="state.chartData['+i+'].label=this.value" placeholder="如DPPH清除率" style="font-size:12px;padding:3px 5px;border:1px solid #ddd;border-radius:4px;width:100%;font-family:inherit"></td>' +
+      '<td><input class="cell-input" value="'+esc(row.value||'')+'" onchange="state.chartData['+i+'].value=this.value" placeholder="如92.35" style="font-size:12px;padding:3px 5px;border:1px solid #ddd;border-radius:4px;width:100%;font-family:inherit"></td>' +
+      '<td><input class="cell-input" value="'+esc(row.unit||'')+'" onchange="state.chartData['+i+'].unit=this.value" placeholder="如%" style="font-size:12px;padding:3px 5px;border:1px solid #ddd;border-radius:4px;width:100%;font-family:inherit"></td>' +
+      '<td><input class="cell-input" value="'+esc(row.position||'')+'" onchange="state.chartData['+i+'].position=this.value" placeholder="如图1及实施例1" style="font-size:12px;padding:3px 5px;border:1px solid #ddd;border-radius:4px;width:100%;font-family:inherit"></td>' +
+      '<td><input class="cell-input" value="'+esc(row.note||'')+'" onchange="state.chartData['+i+'].note=this.value" placeholder="备注" style="font-size:12px;padding:3px 5px;border:1px solid #ddd;border-radius:4px;width:100%;font-family:inherit"></td>' +
+      '<td class="td-del"><span class="row-del" onclick="state.chartData.splice('+i+',1);renderChartDataTable()" title="删除此行">&times;</span></td></tr>';
+  });
+}
+function addChartDataRow() { state.chartData.push({label:'',value:'',unit:'',position:'',note:''}); renderChartDataTable(); }
+
+async function loadChartData() {
+  if (!CASE_ID) { alert('请先创建或打开案件'); return; }
+  try {
+    var res = await api('GET', '/api/cases/'+CASE_ID+'/chart-data');
+    state.chartData = res.chart_data || [];
+    state.chartDataVerified = res.verified || false;
+    renderChartDataTable();
+    var badge = document.getElementById('chartDataVerifiedBadge');
+    if (badge) badge.style.display = state.chartDataVerified ? 'inline-block' : 'none';
+  } catch(e) {
+    console.error('加载图表数据失败:', e);
+  }
+}
+
+async function saveChartData() {
+  if (!CASE_ID) { alert('请先创建或打开案件'); return; }
+  try {
+    await api('PUT', '/api/cases/'+CASE_ID+'/chart-data', {
+      chart_data: state.chartData.map(function(r) { return {label:r.label||'',value:r.value||'',unit:r.unit||'',position:r.position||'',note:r.note||''}; })
+    });
+    state.chartDataVerified = true;
+    var badge = document.getElementById('chartDataVerifiedBadge');
+    if (badge) badge.style.display = 'inline-block';
+    alert('校对数据已保存，后续AI分析将严格使用这些数据');
+  } catch(e) {
+    console.error('保存图表数据失败:', e);
+    alert('保存失败');
+  }
+}
+
+async function extractChartDataToEffects() {
+  if (!CASE_ID) { alert('请先创建或打开案件'); return; }
+  try {
+    var res = await api('GET', '/api/cases/'+CASE_ID+'/chart-data');
+    var chartData = res.chart_data || [];
+    if (chartData.length === 0) {
+      alert('未从专利文本中提取到实验数据，请确认已上传专利文件。');
+      return;
+    }
+    var added = 0;
+    chartData.forEach(function(item) {
+      // 检查是否已存在相同的技术效果（避免重复）
+      var exists = state.effectRows.some(function(r) {
+        return (r.feature || '').trim() === (item.label || '').trim();
+      });
+      if (!exists) {
+        var valueStr = (item.value || '');
+        if (item.unit) valueStr += ' ' + item.unit;
+        state.effectRows.push({
+          feature: item.label || '',
+          app_position: item.position || '',
+          app_value: valueStr,
+          ref_document: 'D1',
+          ref_position: '',
+          ref_value: '',
+          ref_content: item.note || '',
+          pub_status: 'no',
+          analysis: ''
+        });
+        added++;
+      }
+    });
+    renderEffectTable();
+    if (added > 0) {
+      alert('已提取 ' + added + ' 项实验数据到技术效果比对表，请人工核对并补充对比文件数据。');
+    } else {
+      alert('提取的数据已存在于表格中，未新增重复项。');
+    }
+  } catch(e) {
+    console.error('提取实验数据失败:', e);
+    alert('提取实验数据失败: ' + (e.message || e));
+  }
+}
 
 function syncTable2FromTable1() {
   // 以表二已有行为准，仅在表一中查找匹配行做数据关联（不新增行）
